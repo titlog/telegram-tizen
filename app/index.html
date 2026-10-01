@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>TG 视频</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!-- 主页：左边来源，右边视频网格 -->
+<div id="home">
+  <div id="rail">
+    <div id="brand">TG 视频</div>
+    <div id="rail-wrap"><div id="rail-list"></div></div>
+  </div>
+  <div id="dim"></div>
+  <div id="main">
+    <div id="head"><div id="src-title"></div><div id="src-sub"></div><div id="src-hint">← 换群</div></div>
+    <div id="grid-wrap"><div id="grid"></div></div>
+    <div id="empty"></div>
+  </div>
+</div>
+
+<!-- 播放器 -->
+<div id="player">
+  <video id="v"></video>
+  <div id="spin"><div class="ring"></div><div id="spin-text"></div></div>
+  <div id="seekhint"></div>
+  <div id="ov">
+    <div id="ov-title"></div>
+    <div id="ov-bar"><div id="ov-buf"></div><div id="ov-fill"></div><div id="ov-dot"></div></div>
+    <div id="ov-row"><span id="ov-time"></span><span id="ov-keys">确认 暂停 · ←→ ↑↓ 快进快退（按住越来越快）· 返回 回列表</span></div>
+  </div>
+  <div id="perr"></div>
+</div>
+
+<!-- 登录 -->
+<div id="panel">
+  <div id="how">
+    <div style="font-size:56px;margin-bottom:30px">登录 Telegram</div>
+    手机打开 Telegram →<br><b>设置 → 设备 → 关联桌面设备</b><br>扫右边这个码
+    <div id="qrstate"></div>
+  </div>
+  <div id="qr"></div>
+  <div id="pwbox">这个账号开了两步验证，输入密码后按确认：<br><input id="pw" type="password"></div>
+</div>
+
+<div id="toast"></div>
+<div id="lines"></div>
+
+<script src="js/config.js"></script>
+<script src="js/log.js"></script>
+<script src="js/tg.bundle.js"></script>
+<script src="js/mp4.js"></script>
+<script src="js/player.js"></script>
+<script src="js/tg.js"></script>
+<script src="js/store.js"></script>
+<script src="js/cover.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

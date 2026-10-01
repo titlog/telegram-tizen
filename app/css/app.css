@@ -1,0 +1,98 @@
+/* 1920×1080 固定画布。抖音那边的教训照搬：不用 CSS 滤镜（每次换图都要重新光栅化，和解码器抢 GPU）；
+ * 要整块移动的内容常驻一个合成层（will-change: transform）；焦点放大不做过渡。 */
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #0b0d10; color: #e8eaed;
+             font-family: "Samsung One", "Noto Sans CJK SC", sans-serif; }
+.hide { display: none !important; }
+
+/* ---------- 主页 ---------- */
+#home { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+/* 左边的来源栏：浏览视频时收起来，按左键滑出来盖在网格上（用户 2026-10-01） */
+#rail { position: absolute; left: 0; top: 0; width: 380px; height: 1080px; background: #12161b; z-index: 3;
+        transform: translateX(-380px); transition: transform 0.15s ease-out; will-change: transform; }
+#home.railopen #rail { transform: translateX(0); box-shadow: 12px 0 40px rgba(0, 0, 0, 0.6); }
+#dim { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: #000; opacity: 0; z-index: 2;
+       transition: opacity 0.15s; pointer-events: none; }
+#home.railopen #dim { opacity: 0.55; }
+#brand { height: 120px; line-height: 120px; padding-left: 48px; font-size: 40px; font-weight: bold; color: #2aabee; }
+#rail-wrap { position: absolute; top: 120px; left: 0; width: 380px; height: 930px; overflow: hidden; }
+#rail-list { will-change: transform; }
+.src { height: 72px; line-height: 72px; padding: 0 28px 0 48px; font-size: 30px; white-space: nowrap; overflow: hidden;
+       text-overflow: ellipsis; color: #aeb4bb; border-left: 6px solid transparent; }
+.src .k { font-size: 22px; color: #6b737c; margin-right: 10px; }
+.src.cur { color: #fff; border-left-color: #2aabee; }
+.src.focus { background: #2aabee; color: #fff; }
+.src.focus .k { color: #dff3ff; }
+
+#main { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+/* 浏览页不要顶栏（用户 2026-10-01：不需要展示群名），群名只在左边来源栏里 */
+#head { display: none; }
+#src-hint { position: absolute; right: 60px; top: 46px; font-size: 24px; color: #5f6770; }
+#src-title { font-size: 44px; padding-top: 30px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#src-sub { font-size: 24px; color: #7d858e; margin-top: 6px; }
+#grid-wrap { position: absolute; top: 50px; left: 0; width: 1920px; height: 1030px; overflow: hidden; }
+#grid { position: relative; will-change: transform; }
+.card { position: absolute; width: 576px; height: 450px; }
+.thumb { position: relative; width: 576px; height: 324px; background: #1c2128; border-radius: 10px; overflow: hidden; }
+.thumb img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 没缩略图的片子（不少大文件转发过来就没有）：片名当封面 */
+.ph { position: absolute; left: 0; top: 0; width: 100%; height: 100%; box-sizing: border-box; padding: 0 40px; display: flex;
+      align-items: center; justify-content: center; text-align: center; overflow: hidden; }
+.ph span { font-size: 42px; line-height: 1.3; font-weight: bold; color: rgba(255, 255, 255, 0.92); letter-spacing: 2px;
+           text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5); max-height: 165px; overflow: hidden; }
+/* 海报卡片：海报完整居中（2:3，卡片高 324 → 宽 216），两边是同一张海报缩小再拉伸的底图，压暗一点；底下的片名占位文字藏起来 */
+.thumb.hasposter .ph span { display: none; }
+.pbg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-size: cover; background-position: center; opacity: 0.55; }
+.thumb img.pimg { left: 180px; width: 216px; height: 324px; object-fit: cover; box-shadow: 0 0 30px rgba(0, 0, 0, 0.6); }
+.dur { position: absolute; z-index: 1; right: 8px; bottom: 10px; background: rgba(0, 0, 0, 0.75); color: #fff; font-size: 20px;
+       padding: 2px 8px; border-radius: 4px; }
+.prog { position: absolute; z-index: 1; left: 0; bottom: 0; height: 6px; background: #2aabee; }
+.title { font-size: 30px; line-height: 40px; margin-top: 14px; max-height: 80px; overflow: hidden;
+         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.meta { font-size: 24px; color: #7d858e; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card.focus .thumb { box-shadow: 0 0 0 5px #2aabee; }
+.card.focus .title { color: #fff; }
+#empty { position: absolute; top: 300px; left: 60px; width: 1700px; font-size: 34px; line-height: 1.7; color: #9aa1a9; }
+#empty b { color: #2aabee; }
+
+/* ---------- 播放器 ---------- */
+#player { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: #000; display: none; }
+#player.on { display: block; }
+video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: #000; }
+#ov { position: absolute; left: 0; bottom: 0; width: 1920px; height: 260px; opacity: 0.99;
+      background: linear-gradient(to bottom, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.85)); display: none; }
+#ov.on { display: block; }
+#ov-title { position: absolute; left: 80px; top: 70px; width: 1760px; font-size: 38px; white-space: nowrap; overflow: hidden;
+            text-overflow: ellipsis; text-shadow: 0 0 6px #000; }
+#ov-bar { position: absolute; left: 80px; top: 145px; width: 1760px; height: 8px; background: rgba(255, 255, 255, 0.25); border-radius: 4px; }
+#ov-buf { position: absolute; left: 0; top: 0; height: 8px; background: rgba(255, 255, 255, 0.35); border-radius: 4px; }
+#ov-fill { position: absolute; left: 0; top: 0; height: 8px; background: #2aabee; border-radius: 4px; }
+#ov-dot { position: absolute; top: -8px; width: 24px; height: 24px; margin-left: -12px; background: #fff; border-radius: 12px; }
+#ov-row { position: absolute; left: 80px; top: 180px; width: 1760px; font-size: 28px; color: #d0d4d8; }
+#ov-keys { float: right; color: #8b939b; font-size: 24px; }
+#seekhint { position: absolute; left: 0; top: 440px; width: 1920px; text-align: center; font-size: 64px; font-weight: bold;
+            text-shadow: 0 0 12px #000; display: none; }
+#spin { position: absolute; left: 0; top: 460px; width: 1920px; text-align: center; display: none; }
+#spin.on { display: block; }
+#spin .ring { width: 72px; height: 72px; margin: 0 auto; border: 8px solid rgba(255, 255, 255, 0.2); border-top-color: #2aabee;
+              border-radius: 50%; animation: rot 0.9s linear infinite; }
+#spin-text { margin-top: 24px; font-size: 28px; color: #c5cad0; text-shadow: 0 0 6px #000; }
+@keyframes rot { to { transform: rotate(360deg); } }
+#perr { position: absolute; left: 200px; top: 400px; width: 1520px; text-align: center; font-size: 36px; line-height: 1.6;
+        display: none; }
+
+/* ---------- 登录 ---------- */
+#panel { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: #101418; display: none; }
+#panel.on { display: block; }
+#qr { position: absolute; left: 1180px; top: 190px; width: 620px; height: 620px; background: #fff; }
+#qr svg { width: 100%; height: 100%; display: block; }
+#how { position: absolute; left: 120px; top: 260px; width: 960px; font-size: 40px; line-height: 1.6; }
+#how b { color: #2aabee; }
+#qrstate { color: #999; font-size: 30px; margin-top: 30px; }
+#pwbox { position: absolute; left: 120px; top: 640px; display: none; font-size: 34px; }
+#pwbox.on { display: block; }
+#pw { font-size: 40px; width: 700px; padding: 10px; margin-top: 16px; }
+
+#toast { position: absolute; left: 0; bottom: 70px; width: 1920px; text-align: center; display: none; }
+#toast span { display: inline-block; background: rgba(30, 36, 44, 0.95); color: #fff; font-size: 30px; padding: 16px 36px; border-radius: 40px; }
+#lines { position: absolute; left: 40px; top: 20px; width: 1300px; font-size: 20px; line-height: 1.4; color: #ffd27a;
+         text-shadow: 0 0 4px #000; pointer-events: none; }
