@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://www.w3.org/ns/widgets"
+        xmlns:tizen="http://tizen.org/ns/widgets"
+        id="https://github.com/telegram-tizen/telegram-tizen"
+        version="0.0.1"
+        viewmodes="maximized">
+
+    <tizen:application id="TgTvVideo0.TgVideo"
+                       package="TgTvVideo0"
+                       required_version="6.0"/>
+
+    <access origin="*" subdomains="true"/>
+    <!-- 刻意不写 <tizen:allow-navigation> 和任何 <tizen:content-security-policy*>：写了任何一个，应用就进
+         「CSP 模式」、套默认策略（script-src 'self'），WebAssembly 编译、blob: 视频地址都可能被静默拦掉。
+         抖音、bilibili 两个项目都在设备上实测过这条（见 ../douyin-tizen/CLAUDE.md）。 -->
+
+    <content src="index.html"/>
+    <icon src="icon.png"/>
+    <name>TG 视频</name>
+    <description>Telegram video player for Samsung TV</description>
+
+    <tizen:privilege name="http://tizen.org/privilege/internet"/>
+    <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+
+    <tizen:profile name="tv-samsung"/>
+    <tizen:setting screen-orientation="landscape"
+                   context-menu="disable"
+                   background-support="disable"
+                   encryption="disable"
+                   install-location="auto"
+                   hwkey-event="enable"/>
+</widget>

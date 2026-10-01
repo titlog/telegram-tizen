@@ -1,0 +1,9 @@
+build/node_modules/
+app/js/tg.bundle.js
+*.wgt
+logs/
+.buildResult/
+test/media/
+build/out/
+app/.manifest.tmp
+app/*signature*.xml
