@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>player test</title>
+<style>body{margin:0;background:#000}video{width:960px;height:540px}</style></head>
+<body>
+<video id="v"></video>
+<script src="../app/js/mp4.js"></script>
+<script src="../app/js/player.js"></script>
+<script>
+/* 桌面测试台：HTTP Range 当数据源，跑一套固定的动作，每步报一行（console，run.mjs 收）。
+ *   player.html?f=media/a.mp4&start=30 */
+var q = new URLSearchParams(location.search);
+var video = document.getElementById("v");
+function R(s) { console.log("P: " + s); }
+function sleep(t) { return new Promise(function (r) { setTimeout(r, t); }); }
+
+function httpSource(url, size) {
+    var CH = Player.CH;
+    return {
+        size: size,
+        stream: function (offset, signal, throttle) {
+            var start = Math.floor(offset / CH) * CH;
+            async function* gen() {
+                for (var pos = start; pos < size;) {
+                    await throttle();
+                    var r = await fetch(url, { headers: { Range: "bytes=" + pos + "-" + (Math.min(size, pos + CH) - 1) }, signal: signal });
+                    var b = new Uint8Array(await r.arrayBuffer());
+                    yield b;
+                    pos += b.length;
+                }
+            }
+            return { start: start, iter: gen() };
+        }
+    };
+}
+
+function ranges(sb) { var b = sb.buffered, s = []; for (var i = 0; i < b.length; i++) { s.push(b.start(i).toFixed(3) + "-" + b.end(i).toFixed(3)); } return s.join(" "); }
+
+async function waitMoving(from, ms) {
+    var t0 = performance.now();
+    while (performance.now() - t0 < ms) {
+        if (!video.paused && video.currentTime > from + 0.04) { return Math.round(performance.now() - t0); }
+        await sleep(20);
+    }
+    return -1;
+}
+
+(async function () {
+    var url = q.get("f");
+    var head = await fetch(url, { method: "HEAD" });
+    var size = +head.headers.get("content-length");
+    var states = [];
+    var p = Player.create(video, R, function (ph, msg) { states.push(ph + (msg ? ":" + msg : "")); });
+    window.P = p;
+    var t0 = performance.now();
+    try { await p.open(httpSource(url, size), { startAt: +(q.get("start") || 0) }); }
+    catch (e) { R("RESULT open 失败 " + e.message); return; }
+    R("RESULT 出画面 " + Math.round(performance.now() - t0) + "ms t=" + video.currentTime.toFixed(2));
+    await sleep(2500);
+    R("RESULT 播了 2.5 秒 t=" + video.currentTime.toFixed(2) + " 各轨 " + p.debug());
+
+    var dur = p.duration();
+    var steps = [["快进 +10", function () { p.seek(video.currentTime + 10, 1); }],
+                 ["跳到一半", function () { p.seek(dur * 0.5, 0); }],
+                 ["跳到四分之一", function () { p.seek(dur * 0.25, 0); }],
+                 ["快退 -10", function () { p.seek(video.currentTime - 10, -1); }]];
+    for (var i = 0; i < steps.length; i++) {
+        var from = video.currentTime;
+        steps[i][1]();
+        await sleep(30);
+        var target = video.currentTime;
+        var ms = await waitMoving(target, 15000);
+        R("RESULT " + steps[i][0] + "：" + from.toFixed(1) + " → " + target.toFixed(2) + "，动起来 " + ms + "ms 各轨 " + p.debug());
+        await sleep(1500);
+    }
+    /* 跳到末尾前 4 秒，看能不能播完 */
+    p.seek(dur - 4, 0);
+    var t1 = performance.now();
+    while (!video.ended && performance.now() - t1 < 20000) { await sleep(100); }
+    R("RESULT 播完=" + video.ended + " t=" + video.currentTime.toFixed(2) + "/" + dur.toFixed(2) + " 状态序列 " + states.join(","));
+    R("DONE");
+})();
+</script>
+</body></html>
