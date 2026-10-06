@@ -7,3 +7,5 @@ test/media/
 build/out/
 app/.manifest.tmp
 app/*signature*.xml
+app/js/sites.local.js
+NOTES.local.md

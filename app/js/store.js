@@ -43,7 +43,18 @@ var Store = (function () {
     function markNoFrame(key) { noF[key] = Date.now(); write(FKEY, noF); }
 
     function lastSource() { return read(SKEY, null); }
-    function setLastSource(src) { write(SKEY, { id: src.id, title: src.title }); }
+    function setLastSource(src) { write(SKEY, { id: src.id, title: src.title, kind: src.kind, url: src.url }); }
+
+    /* 网页列表当来源（web.js）：群里发的列表链接。按发在哪个群分组存 —— 每次打开那个群就用这次找到的替换掉，
+     * 群里删了那条消息，来源栏里也就没了。group id → [{id, title, kind: "web", url}] */
+    var WKEY = "tg.webSources.v1", webSrc = read(WKEY, {});
+    function webSources() {
+        var out = [], seen = {};
+        Object.keys(webSrc).forEach(function (g) { webSrc[g].forEach(function (s) { if (!seen[s.id]) { seen[s.id] = true; out.push(s); } }); });
+        return out;
+    }
+    function setWebSources(group, list) { webSrc[group] = list; write(WKEY, webSrc); }
+    function webSourceGroups() { return Object.keys(webSrc); }
 
     /* ---------- moov 缓存、封面缓存（IndexedDB） ---------- */
 
@@ -103,5 +114,5 @@ var Store = (function () {
         return put("cover", key, v, 800);    // 缩略图 20–40KB，800 张 ~30MB
     }
 
-    return { setProgress: setProgress, getProgress: getProgress, srcCount: srcCount, setSrcCount: setSrcCount, noPoster: noPoster, markNoPoster: markNoPoster, noFrame: noFrame, markNoFrame: markNoFrame, lastSource: lastSource, setLastSource: setLastSource, getMoov: getMoov, putMoov: putMoov, getCover: getCover, putCover: putCover };
+    return { setProgress: setProgress, getProgress: getProgress, srcCount: srcCount, setSrcCount: setSrcCount, noPoster: noPoster, markNoPoster: markNoPoster, noFrame: noFrame, markNoFrame: markNoFrame, lastSource: lastSource, setLastSource: setLastSource, webSources: webSources, setWebSources: setWebSources, webSourceGroups: webSourceGroups, getMoov: getMoov, putMoov: putMoov, getCover: getCover, putCover: putCover };
 })();

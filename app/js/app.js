@@ -7,7 +7,7 @@
 
     var $ = function (id) { return document.getElementById(id); };
     var video = $("v");
-    var COLS = 3, CARD_W = 576, GAP_X = 36, PITCH_Y = 470, LEFT = 60, TOP = 12, VIEW_H = 1030, SRC_H = 72;
+    var COLS = 3, CARD_W = 576, CARD_H = 450, GAP_X = 36, PITCH_Y = 470, LEFT = 60, TOP = 12, VIEW_H = 1030, SRC_H = 72;
     /* TOP：选中卡片的描边比卡片多出 5px，第一排贴着网格区域上沿时被 overflow:hidden 切掉（用户 2026-10-01 拍照指出） */   // 三列、占满全宽（来源栏收起来，用户 2026-10-01）
     var S = {
         screen: "boot", zone: "grid",
@@ -75,7 +75,7 @@
         if (last) {
             S.sources = [last];
             renderRail();
-            await openSource(last);
+            await openSource(last, { quiet: true });
             R("启动到主页 " + Math.round(performance.now() - t0) + "ms，来源「" + S.src.title + "」" + S.items.length + " 个视频");
         } else {
             $("empty").innerHTML = "正在找有视频的群和频道…";
@@ -104,10 +104,11 @@
         function refresh() {
             /* 光标留在原来那个来源上（列表变了下标会变） */
             var focusedId = S.zone === "rail" && railItems()[S.railFocus] ? railItems()[S.railFocus].id : null;
-            S.sources = list.filter(function (s) {
+            /* 网页列表（群里发的收藏、分类链接）排最前面 */
+            S.sources = Store.webSources().concat(list.filter(function (s) {
                 var c = Store.srcCount(s.id);
                 return (c && c.n > 0) || (S.src && s.id === S.src.id);
-            });
+            }));
             var fi = focusedId === null ? -1 : railItems().findIndex(function (s) { return s.id === focusedId; });
             S.railFocus = fi >= 0 ? fi : Math.min(S.railFocus, railItems().length - 1);
             renderRail();
@@ -130,6 +131,7 @@
             }
         }
         await Promise.all([worker(), worker()]);
+        await refreshWebSources(list);
         S.srcLoading = false;
         var after = S.sources.map(function (s) { return s.id; }).join(",");
         R("来源：" + list.length + " 个会话里 " + withVideo + " 个有视频（问了 " + probed + " 个，" + Math.round(performance.now() - t0) + "ms）" +
@@ -176,7 +178,7 @@
 
     /* ---------- 来源 ---------- */
 
-    var KIND = { self: "", group: "群", channel: "频道", user: "私聊" };
+    var KIND = { self: "", group: "群", channel: "频道", user: "私聊", web: "网页" };
 
     function railItems() { return S.sources.concat([{ id: "__logout", title: "退出登录", kind: "" }]); }
 
@@ -192,18 +194,23 @@
         $("rail-list").style.transform = "translateY(" + (-Math.max(0, off)) + "px)";
     }
 
-    async function openSource(src) {
-        S.src = { id: src.id, title: src.title, kind: src.kind };
+    /* opts.quiet：开机进上次的来源时，要登录的不自动弹登录框（用户 2026-10-02：每次开机都被它挡住），按确认才弹 */
+    async function openSource(src, opts) {
+        S.src = { id: src.id, title: src.title, kind: src.kind, url: src.url };
         Store.setLastSource(S.src);
         var g = ++S.gen;
-        S.items = []; S.next = undefined; S.total = 0; S.focus = 0; S.loading = true;
+        S.items = []; S.next = undefined; S.total = 0; S.focus = 0; S.gridOff = 0; S.loading = true;
         $("src-title").textContent = src.title;
         $("src-sub").textContent = "加载中…";
         renderGrid();
         renderRail();
-        var t0 = performance.now(), page;
+        var t0 = performance.now(), page, links;
+        if (src.kind === "web") { return openWebList(S.src, g, t0, opts || {}); }
+        /* 群里发的网站链接（web.js）跟视频混在一起按时间排。只取最近 40 条带链接的消息，翻页只翻视频 */
+        var linksP = TG.links(src.id, 40).catch(function (e) { R("来源「" + src.title + "」取链接出错 " + errStr(e)); return []; });
         try {
             page = await TG.videos(src.id, undefined, 40);
+            links = await linksP;
         } catch (e) {
             if (g !== S.gen) { return; }
             S.loading = false;
@@ -214,9 +221,11 @@
         }
         if (g !== S.gen) { return; }
         S.loading = false;
-        S.items = page.items;
+        syncWebSources(src, links.filter(function (l) { return l.kind === "weblist"; }));
+        links = links.filter(function (l) { return l.kind === "web"; });
+        S.items = page.items.concat(links).sort(function (a, b) { return b.date - a.date; });
         S.next = page.next;
-        S.total = page.total;
+        S.total = page.total + links.length;
         /* 焦点落在最近看过的那一条 */
         var best = -1, at = 0;
         S.items.forEach(function (it, i) {
@@ -224,7 +233,7 @@
             if (p && p.at > at) { at = p.at; best = i; }
         });
         S.focus = best >= 0 ? best : 0;
-        R("来源「" + src.title + "」" + Math.round(performance.now() - t0) + "ms，" + S.items.length + "/" + S.total + " 个视频");
+        R("来源「" + src.title + "」" + Math.round(performance.now() - t0) + "ms，" + S.items.length + "/" + S.total + " 个视频" + (links.length ? "（其中网页链接 " + links.length + " 个）" : ""));
         renderGrid();
     }
 
@@ -232,6 +241,22 @@
         if (S.loading || S.next === undefined || S.next === null) { return; }
         S.loading = true;
         var g = S.gen;
+        if (S.src.kind === "web") {
+            try {
+                var wp = await Web.list(S.src.url, S.next);
+                if (g !== S.gen) { return; }
+                /* 翻页期间网站上新加了片子，整个列表往后挪，同一个会在下一页再出现一次 */
+                var have = {};
+                S.items.forEach(function (it) { have[it.url] = true; });
+                S.items = S.items.concat(wp.items.filter(function (x) { return !have[x.url]; }).map(webItem));
+                S.next = wp.next;
+                if (wp.total) { S.total = wp.total; }
+                renderGrid();
+            } catch (e) {
+                R("列表翻页出错 " + errStr(e));
+            } finally { if (g === S.gen) { S.loading = false; } }
+            return;
+        }
         try {
             var page = await TG.videos(S.src.id, S.next, 40);
             if (g !== S.gen) { return; }
@@ -243,13 +268,151 @@
         } finally { if (g === S.gen) { S.loading = false; } }
     }
 
+    /* ---------- 网页列表当来源（web.js）：群里发的收藏、分类链接 ---------- */
+
+    /* 这个群里这次找到的列表链接，替换掉上次存的；新出现的提示一下 */
+    function syncWebSources(group, lists) {
+        var before = {};
+        Store.webSources().forEach(function (s) { before[s.id] = true; });
+        var mine = lists.map(function (l) { return { id: "web:" + l.url, title: l.title, kind: "web", url: l.url }; });
+        Store.setWebSources(String(group.id), mine);
+        var added = mine.filter(function (s) { return !before[s.id]; });
+        S.sources = Store.webSources().concat(S.sources.filter(function (s) { return s.kind !== "web"; }));
+        renderRail();
+        if (added.length) {
+            R("群「" + group.title + "」里的列表链接 → 来源：" + added.map(function (s) { return s.title + " " + s.url; }).join("，"));
+            toast("左边多了" + (added.length > 1 ? " " + added.length + " 个来源" : "一个来源「" + added[0].title + "」") + "，按 ← 打开", 5000);
+        }
+    }
+
+    /* 发过列表链接的群，跟着来源栏一起刷新（开机、打开来源栏、每 5 分钟）：手机上刚发的链接，电视上按一下 ← 就出来，
+     * 不用先进那个群（第一版只在打开那个群时才读，用户发完公开链接电视上一直没出来，2026-10-02） */
+    async function refreshWebSources(dialogs) {
+        var groups = Store.webSourceGroups();
+        for (var i = 0; i < groups.length; i++) {
+            var d = dialogs.filter(function (x) { return String(x.id) === groups[i]; })[0];
+            if (!d) { continue; }
+            try {
+                var ls = await TG.links(d.id, 40);
+                syncWebSources(d, ls.filter(function (l) { return l.kind === "weblist"; }));
+            } catch (e) { R("刷新群「" + d.title + "」的列表链接出错 " + errStr(e)); }
+        }
+    }
+
+    function webItem(x) {
+        return {
+            kind: "web", key: "web:" + x.url, fileKey: "web:" + x.url, url: x.url, site: new URL(x.url).hostname.replace(/^www\./, ""),
+            doc: null, image: x.image, title: x.title || x.url, caption: "", size: 0, duration: x.duration || 0, date: null,
+            hasCover: false, info: { year: "", rating: "", director: "" }
+        };
+    }
+
+    async function openWebList(src, g, t0, opts) {
+        var page;
+        try {
+            page = await Web.list(src.url);
+        } catch (e) {
+            if (g !== S.gen) { return; }
+            S.loading = false;
+            $("src-sub").textContent = "";
+            if (e.needLogin) {
+                R("列表「" + src.title + "」要登录：" + errStr(e) + (S.loggedIn[src.id] ? "（刚登录成功过 —— 登录状态没带上）" : ""));
+                if (S.loggedIn[src.id]) {
+                    $("empty").innerHTML = "登录成功了，但还是看不到这个列表。<br>电视可能带不上这个网站的登录状态（日志里有详情）。";
+                } else {
+                    $("empty").innerHTML = "这个列表要登录一次才能看（查账号编号）。<br>按确认登录";
+                    if (!opts.quiet) { webLogin(src); }
+                }
+                return;
+            }
+            R("列表「" + src.title + "」出错 " + errStr(e));
+            $("empty").innerHTML = "读不到这个列表：" + esc(errStr(e)) + "<br>按确认重试";
+            return;
+        }
+        if (g !== S.gen) { return; }
+        S.loading = false;
+        S.items = page.items.map(webItem);
+        S.next = page.next;
+        S.total = page.total || S.items.length;
+        var best = -1, at = 0;
+        S.items.forEach(function (it, i) {
+            var p = Store.getProgress(it.fileKey);
+            if (p && p.at > at) { at = p.at; best = i; }
+        });
+        S.focus = best >= 0 ? best : 0;
+        R("列表「" + src.title + "」" + Math.round(performance.now() - t0) + "ms（" + page.how + "），" + S.items.length + "/" + (page.total || "?") + " 个" + (page.next ? "，有下一页" : ""));
+        renderGrid();
+    }
+
+    /* ---------- 网页登录（有的站的列表要登录）：两个输入框，遥控器调出屏幕键盘输入，键盘上的「完成」跳下一格 / 提交。
+     * 密码不存、不写日志；登录状态是网站的 cookie，留在电视的浏览器引擎里。 ---------- */
+
+    S.loggedIn = {};
+    function webLogin(src) {
+        S.screen = "weblogin";
+        S.loginSrc = src;
+        $("wl-site").textContent = new URL(src.url).hostname;
+        $("wl-msg").textContent = "";
+        $("wl-user").value = "";
+        $("wl-pass").value = "";
+        $("wl").classList.add("on");
+        setTimeout(function () { $("wl-user").focus(); }, 50);
+    }
+    function closeWebLogin() {
+        $("wl").classList.remove("on");
+        try { document.activeElement.blur(); } catch (e) {}
+        S.screen = "home";
+    }
+    function submitWebLogin() {
+        var src = S.loginSrc, user = $("wl-user").value.trim(), pass = $("wl-pass").value;
+        if (!user) { $("wl-user").focus(); return; }
+        if (!pass) { $("wl-pass").focus(); return; }
+        $("wl-msg").textContent = "正在登录…";
+        try { document.activeElement.blur(); } catch (e) {}
+        var t0 = performance.now();
+        Web.login(src.url, user, pass).then(function (r) {
+            R("登录 " + new URL(src.url).hostname + "：" + (r.ok ? "成功，账号编号 " + r.userId + (r.favs != null ? "，收藏 " + r.favs + " 个" : "") : "失败 " + r.msg) + "，" + Math.round(performance.now() - t0) + "ms");
+            if (!r.ok) { $("wl-msg").textContent = "登录失败：" + r.msg; $("wl-pass").value = ""; $("wl-pass").focus(); return; }
+            S.loggedIn[src.id] = true;
+            closeWebLogin();
+            toast("登录成功");
+            openSource(src);
+        }).catch(function (e) {
+            R("登录出错 " + errStr(e));
+            $("wl-msg").textContent = "登录出错：" + errStr(e);
+        });
+    }
+    /* 13 = 确认，65376 = 屏幕键盘上的「完成」 */
+    ["wl-user", "wl-pass"].forEach(function (id) {
+        $(id).addEventListener("keydown", function (e) {
+            if (e.keyCode !== 13 && e.keyCode !== 65376) { return; }
+            e.preventDefault();
+            e.stopPropagation();      // 不然冒泡到 document 的按键处理，又提交一次
+            if (id === "wl-user" && this.value.trim()) { $("wl-pass").focus(); }
+            else { submitWebLogin(); }
+        });
+    });
+    function webLoginKey(k) {
+        var inInput = document.activeElement && document.activeElement.tagName === "INPUT";
+        if (k === 10009) {
+            /* 输入框里按返回先收起键盘、不退出；不在输入框里再按一次才退出 */
+            if (inInput) { document.activeElement.blur(); return; }
+            closeWebLogin();
+            return;
+        }
+        if (inInput) { return; }
+        if (k === 38) { $("wl-user").focus(); }
+        else if (k === 40) { $("wl-pass").focus(); }
+        else if (k === 13) { if ($("wl-user").value.trim() && $("wl-pass").value) { submitWebLogin(); } else { $(!$("wl-user").value.trim() ? "wl-user" : "wl-pass").focus(); } }
+    }
+
     /* ---------- 网格 ---------- */
 
     function cardHtml(it, i) {
         var p = Store.getProgress(it.fileKey);
         var x = LEFT + (i % COLS) * (CARD_W + GAP_X), y = TOP + Math.floor(i / COLS) * PITCH_Y;
         var th = S.thumbs[it.fileKey];
-        var meta = fmtSize(it.size) + " · " + fmtDate(it.date);
+        var meta = [it.kind === "web" ? "网页 · " + it.site : fmtSize(it.size), fmtDate(it.date)].filter(Boolean).join(" · ");
         if (p && p.done) { meta = "看完了 · " + meta; }
         else if (p && p.t > 0) { meta = "看到 " + fmtTime(p.t) + " · " + meta; }
         return "<div class='card' id='c" + i + "' style='left:" + x + "px;top:" + y + "px'>" +
@@ -292,8 +455,15 @@
         var el = $("c" + S.focus);
         if (el && S.zone === "grid") { el.classList.add("focus"); }
         var row = Math.floor(S.focus / COLS), rows = Math.ceil(S.items.length / COLS);
-        var off = Math.max(0, Math.min((row - 1) * PITCH_Y, rows * PITCH_Y - VIEW_H + 30));
-        $("grid").style.transform = "translateY(" + (-Math.max(0, off)) + "px)";
+        /* 只在要选的那一排露不全时才滚，滚到刚好露全为止；看得见的就只挪焦点、画面不动（用户 2026-10-02：「眼睛里有 9 个视频，
+         * 想选第一行中间那个，一按上键那一行就滑下来，眼睛还得跟着动」—— 第一版是焦点那一排永远停在第二排的位置）。
+         * 卡片 450 高，上面留 TOP（描边），下面留 10 */
+        var y = TOP + row * PITCH_Y, off = S.gridOff || 0;
+        if (y - TOP < off) { off = y - TOP; }
+        else if (y + CARD_H + 10 > off + VIEW_H) { off = y + CARD_H + 10 - VIEW_H; }
+        off = Math.max(0, Math.min(off, Math.max(0, TOP + rows * PITCH_Y - VIEW_H + 30)));
+        S.gridOff = off;
+        $("grid").style.transform = "translateY(" + (-off) + "px)";
         wantThumbs(Math.max(0, (row - 1) * COLS), Math.min(S.items.length, (row + 4) * COLS));
         if (row >= rows - 2) { loadMore(); }
     }
@@ -401,6 +571,43 @@
         });
     }
 
+    /* 网页链接的封面：本地缓存 → Telegram 给链接生成的预览图 → 页面的 og:image（顺带拿 og:title 当片名）。
+     * 不截帧、不找海报 —— 那两样都要读 Telegram 上的文件。 */
+    function fetchImage(url) {
+        return fetch(url).then(function (r) {
+            if (!r.ok) { throw new Error("封面图 " + r.status); }
+            return r.arrayBuffer();
+        });
+    }
+    function webThumb(it) {
+        return Cover.cached(it).then(function (c) {
+            if (c) { if (c.kind !== "none") { setThumb(it, c); } return; }
+            /* 列表里来的：列表页上就有封面图 */
+            if (it.image) {
+                return fetchImage(it.image).then(function (b) {
+                    setThumb(it, { url: URL.createObjectURL(new Blob([b], { type: "image/jpeg" })), kind: "thumb" });
+                    Cover.keepThumb(it, b);
+                });
+            }
+            var first = it.doc ? TG.thumb(it, CARD_W).catch(function () { return null; }) : Promise.resolve(null);
+            return first.then(function (th) {
+                if (th) { setThumb(it, { url: th.url, kind: "thumb" }); Cover.keepThumb(it, th.bytes); return; }
+                return Web.meta(it.url).then(function (m) {
+                    if (m && m.title && it.title === it.site) { it.title = m.title; retitle(it); }
+                    if (!m || !m.image) { Cover.keepNone(it); return; }
+                    return fetchImage(m.image).then(function (b) {
+                        setThumb(it, { url: URL.createObjectURL(new Blob([b], { type: "image/jpeg" })), kind: "thumb" });
+                        Cover.keepThumb(it, b);
+                    });
+                });
+            });
+        });
+    }
+    function retitle(it) {
+        var i = S.items.indexOf(it), el = i >= 0 && $("c" + i);
+        if (el) { el.querySelector(".title").textContent = it.title; el.querySelector(".ph span").textContent = it.title; }
+    }
+
     function pumpThumbs() {
         while (S.thumbBusy < 3 && S.thumbQ.length) {
             var it = S.thumbQ.shift();
@@ -411,7 +618,7 @@
                 /* 顺序（用户 2026-10-01：群里的优先，网上搜的兜底）：频道给视频设的封面 → Telegram 缩略图（不太暗的话）
                  * → 从片子里解一帧 → 电影（≥40 分钟）的维基百科海报 → 片名卡片。
                  * 定下来的结果（包括「没有」）都存在电视上，下次直接用。缓存里存的不是频道封面、而这条有频道封面的（以前没读这个字段），重新取。 */
-                Cover.cached(it).then(function (c) {
+                (it.kind === "web" ? webThumb(it) : Cover.cached(it).then(function (c) {
                     if (c && (c.kind === "cover" || !it.hasCover)) { if (c.kind !== "none") { setThumb(it, c); } return; }
                     var first = it.hasCover ? TG.cover(it, CARD_W).catch(function (e) { R("频道封面出错「" + it.title + "」" + errStr(e)); return null; }) : Promise.resolve(null);
                     return first.then(function (cv) {
@@ -437,14 +644,16 @@
                             else { fallbackPoster(it); }
                         });
                     });
-                }).catch(function (e) { R("封面出错「" + it.title + "」" + errStr(e)); }).then(function () { S.thumbBusy--; pumpThumbs(); });
+                })).catch(function (e) { R("封面出错「" + it.title + "」" + errStr(e)); }).then(function () { S.thumbBusy--; pumpThumbs(); });
             })(it);
         }
     }
 
     /* ---------- 播放器 ---------- */
 
-    var player = Player.create(video, function (s) { Log.report("player", s); }, onPlayerState);
+    var mse = Player.create(video, function (s) { Log.report("player", s); }, onPlayerState);
+    var webPlayer = Web.player(video, function (s) { Log.report("web", s); }, onPlayerState);
+    var player = mse;      // 当前在用的那个：Telegram 的文件 → mse，网页链接 → webPlayer
     var saveTimer = 0, ovTick = 0;
 
     function onPlayerState(phase, msg) {
@@ -473,6 +682,8 @@
         var p = Store.getProgress(it.fileKey);
         var startAt = p && !p.done && p.t > 20 ? p.t : 0;
         await Cover.cancel();
+        if (it.kind === "web") { playWeb(it, startAt); return; }
+        player = mse;
         var moov = await Store.getMoov(it.fileKey);
         if (S.playing !== it) { return; }
         R("播放「" + it.title + "」" + fmtSize(it.size) + " " + fmtTime(it.duration) + (startAt ? "，从 " + fmtTime(startAt) + " 接着放" : "") + (moov ? "，moov 有缓存" : ""));
@@ -483,6 +694,27 @@
             moov: moov,
             onMoov: function (m) { Store.putMoov(it.fileKey, m); }
         }).then(function () {
+            if (S.playing !== it) { return; }
+            R("出画面 " + Math.round(performance.now() - t0) + "ms");
+            spin(false);
+            hideOverlaySoon();
+        }).catch(function (e) {
+            if (S.playing === it) { showError(errStr(e)); }
+        });
+        clearInterval(saveTimer);
+        saveTimer = setInterval(saveProgress, 5000);
+        clearInterval(ovTick);
+        ovTick = setInterval(drawOverlay, 250);
+    }
+
+    function playWeb(it, startAt) {
+        if (S.playing !== it) { return; }
+        player = webPlayer;
+        R("播放网页「" + it.title + "」" + it.url + (startAt ? "，从 " + fmtTime(startAt) + " 接着放" : ""));
+        if (startAt) { toast("从 " + fmtTime(startAt) + " 接着放"); }
+        var t0 = performance.now(), opening = player.open(it, { startAt: startAt });
+        spin(true, "正在解析网页…");      // open 里报的 loading 会写成「正在打开…」，这里盖掉
+        opening.then(function () {
             if (S.playing !== it) { return; }
             R("出画面 " + Math.round(performance.now() - t0) + "ms");
             spin(false);
@@ -564,7 +796,7 @@
      * 按住不放越按越快（用户 2026-10-01：「无论按多久都是逐秒快进」）：同一个键两次之间不到 0.4 秒算按住，
      * 按住的时间决定每一下的步长。 */
     var STEPS = {
-        small: { at: [0, 1, 2, 3, 5], step: [10, 30, 60, 120, 300] },      // ← →
+        small: { at: [0, 1, 2, 3, 5], step: [15, 30, 60, 120, 300] },      // ← →（按一下 15 秒，用户 2026-10-02；原来 10 秒）
         big: { at: [0, 1, 2, 3, 5], step: [60, 120, 300, 600, 900] }       // ↑ ↓ / 快进快退键
     };
     var hold = { key: 0, start: 0, last: 0 };
@@ -635,7 +867,7 @@
             return;
         }
         if (!n) {
-            if (k === 13 && S.src) { openSource(S.src); }
+            if (k === 13 && S.src) { if (S.src.kind === "web") { S.loggedIn[S.src.id] = false; } openSource(S.src); }
             else if (k === 37) { toRail(); }
             return;
         }
@@ -684,6 +916,7 @@
     document.addEventListener("keydown", function (e) {
         var k = e.keyCode;
         if (S.screen === "password") { return; }
+        if (S.screen === "weblogin") { webLoginKey(k); return; }
         if (S.screen === "bootfail") { if (k === 13) { location.reload(); } else if (k === 10009) { exitApp(); } return; }
         if (S.screen === "login") { if (k === 10009) { exitApp(); } return; }
         if (S.screen === "home") { homeKey(k); e.preventDefault(); }

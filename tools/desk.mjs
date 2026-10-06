@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import { createRequire } from 'node:module';
-const require = createRequire(os.homedir() + '/code/douyin-tizen/spike/desktop-harness/package.json');
+const require = createRequire(os.homedir() + '/code/tizen/douyin-tizen/spike/desktop-harness/package.json');
 const { chromium } = require('playwright-core');
 
 const conf = Object.fromEntries(fs.readFileSync(os.homedir() + '/.telegram-tizen.conf', 'utf8')

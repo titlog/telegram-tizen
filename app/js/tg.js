@@ -3,8 +3,9 @@
 var TG = (function () {
     "use strict";
 
-    var client = null, mode = "";
+    var client = null, mode = "", remake = null, reconnecting = null, reconnects = 0;
     var VIDEO = { _: "inputMessagesFilterVideo" };
+    var URLS = { _: "inputMessagesFilterUrl" };
 
     function timeout(p, ms, what) {
         return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error(what + " " + ms / 1000 + " 秒没回")); }, ms); })]);
@@ -14,6 +15,7 @@ var TG = (function () {
     async function init() {
         var r = await TGLib.create(TG_API_ID, TG_API_HASH);
         client = r.client;
+        remake = r.reconnect || null;
         mode = r.mode;
         try {
             await timeout(client.connect(), 15000, "连接");
@@ -21,13 +23,37 @@ var TG = (function () {
             if (mode !== "worker") { throw e; }
             mode = "direct（后台线程：" + e.message + "）";
             client = (await TGLib.create(TG_API_ID, TG_API_HASH, "direct")).client;
+            remake = null;     // 主线程直连没有后台线程，也就没有「连接作废」
             await client.connect();
         }
         return client;
     }
 
+    /* 后台线程的连接被作废（应用在后台挂了一分钟以上，见 build/src/entry.js）：在同一个线程上重连，再把失败的那次重试一遍 */
+    function gone(e) { return /Worker connection (expired|closed)/.test(String(e && e.message)); }
+    function reconnect() {
+        if (!reconnecting) {
+            var t0 = performance.now();
+            reconnecting = (async function () {
+                client = remake();
+                await client.connect();
+                reconnects++;
+                Log.report("tg", "后台线程的连接作废了，重连 " + Math.round(performance.now() - t0) + "ms（第 " + reconnects + " 次）");
+            })().finally(function () { reconnecting = null; });
+        }
+        return reconnecting;
+    }
+    async function again(fn) {
+        try { return await fn(); }
+        catch (e) {
+            if (!remake || !gone(e)) { throw e; }
+            await reconnect();
+            return await fn();
+        }
+    }
+
     async function me() {
-        try { return await client.getMe(); } catch (e) { return null; }
+        try { return await again(function () { return client.getMe(); }); } catch (e) { return null; }
     }
 
     /* onUrl(url, expires) 每换一张码调一次；askPassword() → Promise<string>（两步验证） */
@@ -38,7 +64,8 @@ var TG = (function () {
     async function logout() { try { await client.logOut(); } catch (e) {} }
 
     /* 来源：收藏夹排第一，后面是最近的群 / 频道 / 私聊（不管里面有没有视频 —— 一个个去搜太慢；点进去是空的就写「没有视频」） */
-    async function sources(limit) {
+    function sources(limit) { return again(function () { return sourcesOnce(limit); }); }
+    async function sourcesOnce(limit) {
         var out = [];   // 不要收藏夹（用户 2026-10-01：习惯用自己建的一个群）
         var n = 0;
         for await (var d of client.iterDialogs({ limit: limit || 40, archived: "exclude" })) {
@@ -56,13 +83,13 @@ var TG = (function () {
 
     /* 这个来源里有几个视频（只问数量，limit 1） */
     async function videoCount(sourceId) {
-        var res = await client.searchMessages({ chatId: sourceId, filter: VIDEO, limit: 1 });
+        var res = await again(function () { return client.searchMessages({ chatId: sourceId, filter: VIDEO, limit: 1 }); });
         return res.total || res.length;
     }
 
     /* 一个来源里的视频，新的在前。page.next 传回来取下一页。 */
     async function videos(sourceId, next, limit) {
-        var res = await client.searchMessages({ chatId: sourceId, filter: VIDEO, limit: limit || 40, offset: next });
+        var res = await again(function () { return client.searchMessages({ chatId: sourceId, filter: VIDEO, limit: limit || 40, offset: next }); });
         var items = [];
         res.forEach(function (m) {
             var d = m.media;
@@ -72,12 +99,75 @@ var TG = (function () {
         return { items: items, next: res.next, total: res.total };
     }
 
+    /* 网页链接（见 web.js）：最近的 limit 条带链接的消息里，认识的站、或者直接是 .m3u8 / .mp4 的。带视频的消息（说明文字里
+     * 常有频道链接）不算，那条已经在视频里了。新的在前。 */
+    async function links(sourceId, limit) {
+        var res = await again(function () { return client.searchMessages({ chatId: sourceId, filter: URLS, limit: limit || 40 }); });
+        var items = [], seen = {};
+        res.forEach(function (m) {
+            if (m.media && m.media.type !== "webpage") { return; }
+            var url = linkOf(m);
+            if (!url || seen[url]) { return; }
+            seen[url] = true;
+            if (Web.playable(url)) { items.push(describeLink(m, url)); }
+            else if (Web.listable(url)) {
+                /* 列表页的链接（收藏、分类…）：不进网格，变成左边的一个来源（见 app.js） */
+                var w = m.media && m.media.type === "webpage" ? m.media.preview : null;
+                items.push({ kind: "weblist", url: url, title: captionTitle(m) || Web.listTitle(url, w && w.title), date: m.date });
+            }
+        });
+        return items;
+    }
+
+    /* 消息里原样写的地址优先，Telegram 预览里的地址排最后：预览会把末尾的「/」规整掉，有的站上没有「/」的地址是 404、
+     * 带「/」的才是片子（2026-10-02 电视上第一次就栽在这）。 */
+    function linkOf(m) {
+        var urls = [];
+        (m.entities || []).forEach(function (e) { if (e.kind === "text_link" && e.params && e.params.url) { urls.push(e.params.url); } });
+        (m.text || "").replace(/https?:\/\/[^\s<>"'）)]+/g, function (u) { urls.push(u); return u; });
+        if (m.media && m.media.type === "webpage" && m.media.preview && m.media.preview.url) { urls.push(m.media.preview.url); }
+        for (var i = 0; i < urls.length; i++) { if (Web.playable(urls[i]) || Web.listable(urls[i])) { return Web.normalize(urls[i]); } }
+        return urls[0] || null;
+    }
+
+    /* Telegram 给链接生成的预览：标题、图。Cloudflare 后面的站多半只拿到「Just a moment...」，不算 */
+    function describeLink(m, url) {
+        var w = m.media && m.media.type === "webpage" ? m.media.preview : null;
+        var bare = new URL(url).hostname.replace(/^www\./, "");
+        /* 只有站名（预览没拿到片子页的标题）也不算 */
+        var wt = w && w.title && !/just a moment|attention required/i.test(w.title) && w.title.trim().toLowerCase() !== bare ? w.title.split(/\s[-|｜–]\s/)[0] : "";
+        var meta = Web.cachedMeta(url);
+        var host = new URL(url).hostname.replace(/^www\./, "");
+        return {
+            kind: "web",
+            key: m.chat.id + ":" + m.id,
+            fileKey: "web:" + url,
+            msg: m,
+            url: url,
+            site: host,
+            doc: w && w.photo && !/just a moment/i.test(w.title || "") ? w.photo : null,
+            title: captionTitle(m) || wt || (meta && meta.title) || host,
+            fileName: "",
+            caption: m.text || "",
+            size: 0,
+            duration: 0,
+            width: 0,
+            height: 0,
+            mime: "",
+            date: m.date,
+            hasCover: false,
+            info: captionInfo(m.text || "")
+        };
+    }
+
     /* 标题：说明文字的第一行（去掉链接、@ 提及、标签的 #），没有就用文件名 */
     /* 标题：说明文字第一行。有《》就取书名号里面的（这类频道的惯例：「《#黑鹰坠落 国语 高清》 #2001年美国高分怀旧电影 #动作电影」）；
      * 没有就去掉 #标签（只剩标签时保留标签的字）。链接、@提及都去掉。没有说明文字用文件名。
      * 第一版把 #标签连字一起删了，电视上只剩「《 国语 高清》」（用户 2026-10-01 拍照报的）。 */
     function title(m) {
-        var d = m.media;
+        return captionTitle(m) || ((m.media && m.media.fileName) || "视频").replace(/\.[a-z0-9]{2,4}$/i, "");
+    }
+    function captionTitle(m) {
         var lines = (m.text || "").split("\n").map(function (s) {
             return s.replace(/https?:\/\/\S+/g, "").replace(/@\w+/g, "").trim();
         }).filter(function (s) { return s.replace(/[#\s]/g, "").length > 1; });
@@ -92,7 +182,7 @@ var TG = (function () {
             t = t.replace(/\s+/g, " ").trim();
             if (t.length > 1) { return t.slice(0, 60); }
         }
-        return (d.fileName || "视频").replace(/\.[a-z0-9]{2,4}$/i, "");
+        return "";
     }
 
     /* 说明文字里的片子信息（这类频道的惯例格式：「豆瓣评分\n8.7」「上映日期: 2001-12-18」「导演: 雷德利·斯科特」） */
@@ -133,7 +223,7 @@ var TG = (function () {
             if (!best || Math.abs(t.width - want) < Math.abs(best.width - want)) { best = t; }
         });
         if (!best) { return null; }
-        var buf = await client.downloadAsBuffer(best);
+        var buf = await again(function () { return client.downloadAsBuffer(best); });
         return { url: URL.createObjectURL(new Blob([buf], { type: "image/jpeg" })), bytes: buf };
     }
 
@@ -146,7 +236,7 @@ var TG = (function () {
             .sort(function (a, b) { return a.width - b.width; });
         var best = ts.filter(function (t) { return t.width >= want; })[0] || ts[ts.length - 1];
         if (!best) { return null; }
-        var buf = await client.downloadAsBuffer(best);
+        var buf = await again(function () { return client.downloadAsBuffer(best); });
         return { url: URL.createObjectURL(new Blob([buf], { type: "image/jpeg" })), bytes: buf, w: best.width, h: best.height };
     }
 
@@ -159,8 +249,10 @@ var TG = (function () {
         async function* guard(it) {
             try { for await (var c of it) { yield c; } }
             catch (e) {
+                /* 连接作废：先重连，再抛出去让播放器重试（重试时用的是新的 client） */
+                if (remake && gone(e)) { await reconnect(); throw e; }
                 if (/FILE_REFERENCE|File ref/i.test(String(e && (e.message || e.text)))) {
-                    var ms = await client.getMessages(item.msg.chat.id, [item.msg.id]);
+                    var ms = await again(function () { return client.getMessages(item.msg.chat.id, [item.msg.id]); });
                     if (ms && ms[0] && ms[0].media) { item.msg = ms[0]; item.doc = ms[0].media; }
                 }
                 throw e;
@@ -179,8 +271,8 @@ var TG = (function () {
     }
 
     return {
-        init: init, me: me, login: login, logout: logout, sources: sources, videos: videos, videoCount: videoCount, thumb: thumb, cover: cover, source: source,
-        searchGlobal: function (q) { return client.searchGlobal({ query: q, limit: 50, filter: VIDEO }); },
+        init: init, me: me, login: login, logout: logout, sources: sources, videos: videos, links: links, videoCount: videoCount, thumb: thumb, cover: cover, source: source,
+        searchGlobal: function (q) { return again(function () { return client.searchGlobal({ query: q, limit: 50, filter: VIDEO }); }); },
         describe: describe,
         mode: function () { return mode; },
         primaryDc: function () { return client.getPrimaryDcId(); }

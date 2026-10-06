@@ -15,12 +15,16 @@ const simd = WebAssembly.validate(new Uint8Array(
 
 const INIT = { deviceModel: 'Samsung TV', systemVersion: 'Tizen', appVersion: '0.1' };
 
+/* reconnect：在同一个后台线程上开一条新连接（新的 port + client）。电视把应用挂到后台时主线程整个停住、发不出心跳，
+ * 后台线程 60 秒收不到就把这条连接作废（mtcute 的 WORKER_HEARTBEAT_TIMEOUT），切回来所有请求都是
+ * 「Worker connection expired」（2026-10-02 切去哔哩哔哩 6 分钟再切回来）。后台线程本身还活着、到 Telegram 的连接也在，
+ * 它支持同时挂多条连接，所以不用重建线程、不用重新登录。 */
 function createInWorker(apiId, apiHash) {
   const url = URL.createObjectURL(new Blob(
     ['self.TG_CFG=' + JSON.stringify({ apiId, apiHash }) + ';\n', workerSrc], { type: 'text/javascript' }));
   const worker = new Worker(url);
-  const port = new TelegramWorkerPort({ worker });
-  return new TelegramClient({ client: port });
+  const make = () => new TelegramClient({ client: new TelegramWorkerPort({ worker }) });
+  return { client: make(), reconnect: make };
 }
 
 /* 退路：主线程直连。交给 mtcute 的必须是编译好的 WebAssembly.Module：给它字节的话，它的 loadWasmBinary 走
@@ -38,7 +42,7 @@ async function createDirect(apiId, apiHash) {
 
 async function create(apiId, apiHash, mode) {
   if (mode !== 'direct') {
-    try { return { client: createInWorker(apiId, apiHash), mode: 'worker' }; }
+    try { const w = createInWorker(apiId, apiHash); return { client: w.client, reconnect: w.reconnect, mode: 'worker' }; }
     catch (e) { return { client: await createDirect(apiId, apiHash), mode: 'direct（后台线程建不起来：' + (e && e.message) + '）' }; }
   }
   return { client: await createDirect(apiId, apiHash), mode: 'direct' };

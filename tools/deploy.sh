@@ -71,9 +71,17 @@ for i in $(seq 1 20); do
   sleep 5
 done
 sdb devices | grep -q "$TV_IP" || { echo "TV not reachable at $TV_IP（醒着吗？开发者模式登记的还是这台电脑吗？）"; exit 1; }
+# 设备列表里是 device，通道却可能早就卡死了：2026-10-02 一个跑了 17 小时的旧 sdb 服务，连 shell echo 都不回，
+# tizen install 一声不吭地等了 13 分钟。先试一下，不通就重启服务再连。
+if ! perl -e 'alarm 15; exec @ARGV' sdb -s "$TV" shell echo ok >/dev/null 2>&1; then
+  echo "  sdb 通道不通，重启 sdb 服务"
+  sdb kill-server >/dev/null 2>&1 || true
+  sdb connect "$TV" >/dev/null 2>&1 || true
+  perl -e 'alarm 15; exec @ARGV' sdb -s "$TV" shell echo ok >/dev/null 2>&1 || { echo "重启 sdb 之后还是不通"; exit 1; }
+fi
 
 echo "== installing =="
-tizen install -n "$(basename "$WGT")" -t "$TARGET" 2>&1 | grep -E "install completed|successfully|failed|error" \
+perl -e 'alarm 240; exec @ARGV' tizen install -n "$(basename "$WGT")" -t "$TARGET" 2>&1 | grep -E "install completed|successfully|failed|error" \
   || { echo "  install produced no recognisable result"; exit 1; }
 
 echo "== launching =="

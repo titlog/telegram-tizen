@@ -2,7 +2,7 @@
  *   node test/run.mjs media/a_h264_fast.mp4 [media/b.mp4?start=30 …] */
 import os from 'node:os';
 import { createRequire } from 'node:module';
-const require = createRequire(os.homedir() + '/code/douyin-tizen/spike/desktop-harness/package.json');
+const require = createRequire(os.homedir() + '/code/tizen/douyin-tizen/spike/desktop-harness/package.json');
 const { chromium } = require('playwright-core');
 
 const PORT = process.env.PORT || 8768;

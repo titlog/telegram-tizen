@@ -45,6 +45,17 @@
   <div id="pwbox">这个账号开了两步验证，输入密码后按确认：<br><input id="pw" type="password"></div>
 </div>
 
+<!-- 网页登录（有的站的列表要登录） -->
+<div id="wl">
+  <div class="box">
+    <div class="h">登录 <span id="wl-site"></span></div>
+    <div class="sub">登录一次，查到你的账号编号，之后直接读公开的页面，不用再登录。<br>用遥控器输入，输完按屏幕键盘上的「完成」。密码不保存。按返回键取消。</div>
+    <div class="lab">账号</div><input id="wl-user" type="text" autocomplete="off">
+    <div class="lab">密码</div><input id="wl-pass" type="password">
+    <div id="wl-msg"></div>
+  </div>
+</div>
+
 <div id="toast"></div>
 <div id="lines"></div>
 
@@ -53,6 +64,10 @@
 <script src="js/tg.bundle.js"></script>
 <script src="js/mp4.js"></script>
 <script src="js/player.js"></script>
+<script src="js/vendor/hls.min.js"></script>
+<script src="js/web.js"></script>
+<!-- 站点规则（Web.register）：本机自己写，不进仓库，见 web.js 开头。没有这个文件时这一行什么都不做 -->
+<script src="js/sites.local.js"></script>
 <script src="js/tg.js"></script>
 <script src="js/store.js"></script>
 <script src="js/cover.js"></script>
