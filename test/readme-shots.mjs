@@ -1,10 +1,14 @@
-/* README 的截图：假的 Telegram 层（来源、视频都是编的，片子是 Blender 基金会的开源动画），不碰任何真账号、真群。
+/* README 的截图：假的 Telegram 层（来源、视频都是编的，片子是 Blender 的开源电影），不碰任何真账号、真群。
  * 本机的 js/sites.local.js 换成空的，config.js 换成假凭证 —— 截图里不会出现本机写的站点规则。
  * 要先准备（都在 test/media/，不进仓库）：
  *   curl -o test/media/sintel_trailer-1080p.mp4 https://download.blender.org/durian/trailer/sintel_trailer-1080p.mp4
- *   ffmpeg -ss 33 -i test/media/sintel_trailer-1080p.mp4 -frames:v 1 -vf scale=640:-2 test/media/thumbs/sintel_33.jpg
+ *   ffmpeg -ss 33 -i test/media/sintel_trailer-1080p.mp4 -frames:v 1 -vf crop=1920:818:0:130,scale=640:-2 test/media/thumbs/sintel_33.jpg   # 裁掉上下黑边
+ * 其余几部的封面是从 Wikimedia Commons 上的正片里取的一帧（下面 films 里的文件名和秒数），一次一帧、中间歇几秒 ——
+ * 并发的范围请求它回 429：
+ *   ffmpeg -ss 200 -i https://upload.wikimedia.org/wikipedia/commons/c/c0/Big_Buck_Bunny_4K.webm \
+ *          -frames:v 1 -vf scale=640:-2,format=yuvj420p test/media/thumbs/bbb_200.jpg
  * 然后：RATE=0 LAT=0 node test/serve.mjs & node test/readme-shots.mjs   → docs/screenshots/*.jpg（1600×900，macOS 的 sips 转）
- * Sintel 预告片 © Blender Foundation | durian.blender.org，CC BY 3.0。 */
+ * 片子都是 Blender Foundation / Blender Studio 的，CC BY（2.5–4.0，各片见 films）。 */
 import fs from 'node:fs';
 import os from 'node:os';
 import { createRequire } from 'node:module';
@@ -18,15 +22,24 @@ fs.mkdirSync(OUT, { recursive: true });
 const sintel = ROOT + 'test/media/sintel_trailer-1080p.mp4';
 if (!fs.existsSync(sintel)) { console.log('先下载 Sintel 预告片，见文件开头'); process.exit(1); }
 
-/* 第一条是真能放的 Sintel 预告片；其余几部只有标题（文件不存在 —— 封面取不到帧，显示片名卡片）。都短于 40 分钟，不去找海报。 */
+/* 第一条是真能放的 Sintel 预告片；其余几部只有封面（片子文件不存在，截图里不点开）。都短于 40 分钟，不去找海报。
+ * [标题, 时长秒, 封面（test/media/thumbs/ 下）, 能放的文件]；注释是作者、协议、封面取自 Commons 上的哪个文件： */
 const day = 86400000;
 const films = [
-  ['Sintel 预告片', 52, 'sintel'],
-  ['Big Buck Bunny 大雄兔', 596], ['Elephants Dream 大象之梦', 653], ['Tears of Steel 钢之泪', 734],
-  ['Spring 春天', 464], ['Cosmos Laundromat 宇宙洗衣店', 730], ['Agent 327: Operation Barbershop', 231],
-  ['Coffee Run', 184], ['Caminandes 3: Llamigos', 150]];
-const items = films.map(([title, duration, file], i) => ({
-  key: 'k' + i, fileKey: 'f' + i, file: file || 'missing-' + i, title, duration,
+  ['Sintel 预告片', 52, 'sintel_33', 'sintel'],            // © Blender Foundation | durian.blender.org，CC BY 3.0；download.blender.org/durian/trailer
+  ['Big Buck Bunny 大雄兔', 635, 'bbb_200'],                // © Blender Foundation | peach.blender.org，CC BY 3.0；c/c0/Big_Buck_Bunny_4K.webm
+  ['Elephants Dream 大象之梦', 658, 'ed_120'],              // © Blender Foundation / Netherlands Media Art Institute，CC BY 2.5；2/28/Elephants_Dream_(2006)_1080p24.webm
+  ['Tears of Steel 钢之泪', 734, 'tos_250'],                // © Blender Foundation | mango.blender.org，CC BY 3.0；c/cb/Tears_of_Steel_1080p.webm
+  ['Spring 春天', 464, 'spring_70'],                        // © Blender Foundation（Andy Goralczyk），CC BY 4.0；a/a5/Spring_-_Blender_Open_Movie.webm
+  ['Sprite Fright', 630, 'sprite_90'],                      // © Blender Studio，CC BY 4.0；7/76/Sprite_Fright_-_Blender_Open_Movie-full_movie.webm
+  ['Charge', 263, 'charge_110'],                            // © Blender Studio，CC BY 4.0；7/7a/Charge_-_Blender_Open_Movie-full_movie.webm
+  ['Coffee Run', 185, 'coffee_25'],                         // © Blender Foundation，CC BY 4.0；3/3f/Coffee_Run_-_Blender_Open_Movie-full_movie.webm
+  ['Caminandes 3: Llamigos', 150, 'cami_55']];              // © Blender Institute（Pablo Vazquez），CC BY 3.0；a/ab/Caminandes_3_-_Llamigos_-_Blender_Animated_Short.webm
+for (const [, , thumb] of films) {
+  if (!fs.existsSync(ROOT + 'test/media/thumbs/' + thumb + '.jpg')) { console.log('缺封面 test/media/thumbs/' + thumb + '.jpg，见文件开头'); process.exit(1); }
+}
+const items = films.map(([title, duration, thumb, file], i) => ({
+  key: 'k' + i, fileKey: 'f' + i, file: file || 'missing-' + i, thumb, title, duration,
   size: file ? fs.statSync(sintel).size : Math.round(duration * 1.6 * 1048576 / 10),
   date: Date.now() - (i * 2 + 1) * day, info: { year: '', rating: '', director: '' } }));
 
@@ -58,8 +71,7 @@ var TG = (function () {
     videos: async function () { return { items: ITEMS, next: undefined, total: ITEMS.length }; },
     links: async function () { return []; },
     thumb: async function (it) {
-      if (it.file !== "sintel") { return null; }
-      var b = await (await fetch("/test/media/thumbs/sintel_33.jpg")).arrayBuffer();
+      var b = await (await fetch("/test/media/thumbs/" + it.thumb + ".jpg")).arrayBuffer();
       return { url: URL.createObjectURL(new Blob([b], { type: "image/jpeg" })), bytes: b };
     },
     source: function (it) { return httpSource("/test/media/" + (it.file === "sintel" ? "sintel_trailer-1080p" : it.file) + ".mp4", it.size); },

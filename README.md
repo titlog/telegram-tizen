@@ -10,15 +10,17 @@
 
 ![视频网格](docs/screenshots/01-home.jpg)
 
-*一个来源里的视频，三列；看过的带进度条。没有可用封面的显示片名卡片。*
+*一个来源里的视频，三列；看过的带进度条。*
 
 | | |
 |---|---|
 | ![来源栏](docs/screenshots/02-sources.jpg) | ![播放](docs/screenshots/03-player.jpg) |
 | 按左键滑出来源栏：有视频的群和频道 | 边下边播，从上次看到的地方接着放 |
 
-> 截图里的群名、视频都是编的（`test/readme-shots.mjs` 换掉了 Telegram 层）。播放画面是 Blender 基金会的开源电影
-> [Sintel](https://durian.blender.org/) 预告片，© Blender Foundation，[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)。
+> 截图里的群名、日期和文件大小是编的（`test/readme-shots.mjs` 换掉了 Telegram 层）。视频都是 Blender 的开源电影：
+> [Sintel](https://durian.blender.org/)（播放的是它的预告片）、Big Buck Bunny、Elephants Dream、Tears of Steel、Spring、
+> Sprite Fright、Charge、Coffee Run、Caminandes 3，© Blender Foundation / Blender Studio，CC BY（2.5–4.0），
+> 封面是片中的画面。各片的作者、出处和协议版本见 `test/readme-shots.mjs`。
 
 ## 能做的
 
@@ -103,8 +105,10 @@ MIT。`app/js/vendor/hls.min.js`（hls.js）是 Apache-2.0；打包时进来的 
 A player for the videos in your Telegram groups and channels, on Samsung Tizen TVs. Sign in with a QR code; your
 groups and channels with videos are on the left, a grid of their videos on the right, and the remote plays them.
 It streams while downloading, so a multi-gigabyte film starts in seconds and seeks freely. The TV talks to
-Telegram directly — no server; the session stays on the set. (The screenshots use made-up groups and titles; the
-playing video is the trailer of Blender Foundation's open movie [Sintel](https://durian.blender.org/), CC BY 3.0.)
+Telegram directly — no server; the session stays on the set. (The screenshots use made-up group names; the
+videos are Blender open movies — [Sintel](https://durian.blender.org/) (its trailer is the one playing), Big Buck Bunny,
+Elephants Dream, Tears of Steel, Spring, Sprite Fright, Charge, Coffee Run and Caminandes 3 — © Blender Foundation /
+Blender Studio, CC BY 2.5–4.0; per-film credits are in `test/readme-shots.mjs`.)
 
 - QR sign-in with [mtcute](https://github.com/mtcute/mtcute), running in a worker.
 - A hand-written MP4 parser feeding MSE: a 2.6 GB film starts in 5.8 s, seeks to unbuffered positions in 0.6 s.
