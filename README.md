@@ -8,6 +8,18 @@
 > **与 Telegram、三星均无关联。** 个人项目，MIT 协议。
 > 兄弟项目：[bilibili-tizen](https://github.com/titlog/bilibili-tizen)、[douyin-tizen](https://github.com/titlog/douyin-tizen)。
 
+![视频网格](docs/screenshots/01-home.jpg)
+
+*一个来源里的视频，三列；看过的带进度条。没有可用封面的显示片名卡片。*
+
+| | |
+|---|---|
+| ![来源栏](docs/screenshots/02-sources.jpg) | ![播放](docs/screenshots/03-player.jpg) |
+| 按左键滑出来源栏：有视频的群和频道 | 边下边播，从上次看到的地方接着放 |
+
+> 截图里的群名、视频都是编的（`test/readme-shots.mjs` 换掉了 Telegram 层）。播放画面是 Blender 基金会的开源电影
+> [Sintel](https://durian.blender.org/) 预告片，© Blender Foundation，[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)。
+
 ## 能做的
 
 - **扫码登录**（[mtcute](https://github.com/mtcute/mtcute)，客户端跑在后台线程，界面不卡），会话活得过重新安装。
@@ -60,7 +72,8 @@ node tools/collect.mjs       # 终端 1：在 8097 端口收电视上报的日�
 zsh tools/deploy.sh          # 终端 2
 ```
 
-桌面上的测试在 `test/`：`check.mjs` 对照 ffprobe 校验 MP4 解析，`run.mjs` 测播放引擎，`ui-emu.mjs` 用假数据把界面走一遍并截图。
+桌面上的测试在 `test/`：`check.mjs` 对照 ffprobe 校验 MP4 解析，`run.mjs` 测播放引擎，`ui-emu.mjs` 用假数据把界面走一遍并截图，
+`readme-shots.mjs` 重拍 README 里的截图。
 它们要 Playwright 和 ffmpeg，测试片自己用 ffmpeg 生成（见各文件开头）。全部测量、坑和调试方法在 [`CLAUDE.md`](CLAUDE.md)。
 
 ## 目录
@@ -90,7 +103,8 @@ MIT。`app/js/vendor/hls.min.js`（hls.js）是 Apache-2.0；打包时进来的 
 A player for the videos in your Telegram groups and channels, on Samsung Tizen TVs. Sign in with a QR code; your
 groups and channels with videos are on the left, a grid of their videos on the right, and the remote plays them.
 It streams while downloading, so a multi-gigabyte film starts in seconds and seeks freely. The TV talks to
-Telegram directly — no server; the session stays on the set.
+Telegram directly — no server; the session stays on the set. (The screenshots use made-up groups and titles; the
+playing video is the trailer of Blender Foundation's open movie [Sintel](https://durian.blender.org/), CC BY 3.0.)
 
 - QR sign-in with [mtcute](https://github.com/mtcute/mtcute), running in a worker.
 - A hand-written MP4 parser feeding MSE: a 2.6 GB film starts in 5.8 s, seeks to unbuffered positions in 0.6 s.
