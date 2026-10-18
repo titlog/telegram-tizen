@@ -20,6 +20,25 @@ for (let i = 0; i < 11; i++) {
     info: f === 'e_long_2h' ? { year: '2001', rating: '8.7', director: '雷德利·斯科特' } : { year: '', rating: '', director: '' } });
 }
 
+/* 只从搜索里出来的片子（不打乱上面那些步骤的位置）：双音轨 + 内嵌中文字幕的 MP4，两集短剧，MKV。
+ * test/media/ui/ 里的生成方法：
+ *   multi.mp4：ffmpeg -i ../a_h264_fast.mp4 -f lavfi -i "sine=frequency=330:duration=60:sample_rate=48000" -i zh.srt -map 0:v -map 0:a -map 1:a -map 2
+ *     -c:v copy -c:a:0 copy -c:a:1 aac -b:a:1 96k -c:s mov_text -metadata:s:a:0 language=chi -metadata:s:a:0 handler_name=国语
+ *     -metadata:s:a:1 language=eng -metadata:s:a:1 handler_name=导演评论 -metadata:s:s:0 language=chi -disposition:a:0 default -disposition:a:1 0 multi.mp4
+ *   ep1/ep2.mp4：ffmpeg -ss 0/20 -i ../a_h264_fast.mp4 -t 12 -c copy epN.mp4；ext_gbk.srt = iconv -t gbk ext.srt
+ * MKV 用 test/check-mkv.mjs 生成的（有就加上）。 */
+const extra = [];
+const addExtra = (path, o) => { if (!fs.existsSync(`${ROOT}test/media/${path}`)) return;
+  extra.push({ key: 'x' + extra.length, fileKey: 'x' + extra.length, path, size: fs.statSync(`${ROOT}test/media/${path}`).size, date: Date.now() - (60 + extra.length) * 86400000,
+    info: { year: '', rating: '', director: '' }, msg: { id: 100 + extra.length, chat: { id: 9 } }, ...o }); };
+addExtra('ui/multi.mp4', { title: '双音轨 + 内嵌字幕', fileName: 'Double.Audio.2020.mp4', duration: 60 });
+addExtra('ui/ep2.mp4', { title: '测试剧 第2集', fileName: 'ep2.mp4', duration: 12 });
+addExtra('ui/ep1.mp4', { title: '测试剧 第1集', fileName: 'ep1.mp4', duration: 12 });
+for (const f of fs.existsSync(`${ROOT}test/media/mkv`) ? fs.readdirSync(`${ROOT}test/media/mkv`).filter(f => /\.(mkv|webm)$/.test(f)).sort() : []) {
+  addExtra('mkv/' + f, { title: 'MKV ' + f, fileName: f, duration: 0, asFile: true });
+}
+const subFiles = { 'Double.Audio.2020.mp4': [{ name: 'Double.Audio.2020.chs.srt', lang: '简体', size: 141, score: 4, doc: { path: '/test/media/ui/ext_gbk.srt' } }] };
+
 /* 群里发的网页链接（web.js）：一条直接是 .m3u8 的，指向 test/media/hls（AES-128 加密的 HLS，生成方法：
  * cd test/media/hls && openssl rand 16 > k.key && printf 'k.key\\nk.key\\n%s\\n' $(openssl rand -hex 16) > k.info &&
  * ffmpeg -i ../a_h264_fast.mp4 -c copy -bsf:v h264_mp4toannexb -hls_time 4 -hls_playlist_type vod -hls_key_info_file k.info -hls_segment_filename 'a%03d.ts' a.m3u8） */
@@ -33,6 +52,9 @@ var TG = (function () {
   var ITEMS = ${JSON.stringify(items)};
   ITEMS.forEach(function (it) { it.date = new Date(it.date); });
   var LINKS = ${JSON.stringify(links)};
+  var EXTRA = ${JSON.stringify(extra)};
+  EXTRA.forEach(function (it) { it.date = new Date(it.date); });
+  var SUBS = ${JSON.stringify(subFiles)};
   LINKS.forEach(function (it) { it.date = new Date(it.date); });
   function httpSource(url, size) {
     var CH = Player.CH;
@@ -60,7 +82,11 @@ var TG = (function () {
     thumb: async function (it) { window.__thumbCall && window.__thumbCall(); if (it.file === "e_long_2h" || it.file === "c_hevc") { return null; }
       var b = await (await fetch("/test/media/thumbs/" + it.file + ".jpg")).arrayBuffer();
       return { url: URL.createObjectURL(new Blob([b], { type: "image/jpeg" })), bytes: b }; },
-    source: function (it) { return httpSource("/test/media/" + it.file + ".mp4", it.size); },
+    source: function (it) { return httpSource("/test/media/" + (it.path || it.file + ".mp4"), it.size); },
+    search: async function (q) { await new Promise(function (r) { setTimeout(r, 200); });
+      var list = EXTRA.filter(function (it) { return it.title.indexOf(q) >= 0; }); return { items: list, next: undefined, total: list.length }; },
+    subtitlesFor: async function (it) { return SUBS[it.fileName] || []; },
+    download: async function (doc) { return new Uint8Array(await (await fetch(doc.path)).arrayBuffer()); },
     describe: function (x) { return x; }
   };
 })();`;
@@ -128,14 +154,41 @@ await page.route('https://videos.example/**', async (route, req) => {
 });
 await page.route('**/app/js/config.js', r => r.fulfill({ contentType: 'text/javascript', body: 'var REPORT_TO=""; var TG_API_ID=1; var TG_API_HASH="x";' }));
 const sleep = (t) => new Promise(r => setTimeout(r, t));
-const key = async (code, n = 1) => { for (let i = 0; i < n; i++) { await page.evaluate(c => document.dispatchEvent(new KeyboardEvent('keydown', { keyCode: c, bubbles: true })), code); await sleep(120); } };
+/* 一下 = keydown + keyup（遥控器也是这样；确认键在松开时才算短按，按住 650ms 是菜单） */
+const ev = (type, c) => page.evaluate(([t, c]) => document.dispatchEvent(new KeyboardEvent(t, { keyCode: c, bubbles: true })), [type, c]);
+const key = async (code, n = 1) => { for (let i = 0; i < n; i++) { await ev('keydown', code); await sleep(40); await ev('keyup', code); await sleep(80); } };
+const hold = async (code, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { await ev('keydown', code); await sleep(100); } await ev('keyup', code); await sleep(200); };
 const shot = async (name) => { await page.screenshot({ path: `${ROOT}logs/ui-${name}.png` }); console.log('  截图 ' + name); };
+
+const vt = () => page.evaluate(() => document.getElementById('v').currentTime);
+const txt = (sel) => page.evaluate(s => { const e = document.querySelector(s); return e ? e.textContent.replace(/\s+/g, ' ').trim() : null; }, sel);
+const search = async (q) => {
+  await key(37, 4); await key(38, 15); await key(13); await sleep(400);
+  await page.fill('#sx-q', q);
+  await page.evaluate(() => document.getElementById('sx-q').dispatchEvent(new KeyboardEvent('keydown', { keyCode: 65376, bubbles: true })));
+  await sleep(1200);
+};
+const menuRows = () => page.evaluate(() => [...document.querySelectorAll('#menu .mh, #menu .mi')].map(e =>
+  (e.classList.contains('mh') ? '# ' : e.classList.contains('dis') ? '- ' : e.classList.contains('focus') ? '> ' : '  ') + e.textContent));
+/* 菜单里把光标挪到 pred 认的那一行（↑↓ 会跳过标题和灰掉的行） */
+const goto = async (pred) => {
+  const sel = (await menuRows()).filter(x => !x.startsWith('# ') && !x.startsWith('- '));
+  const cur = sel.findIndex(x => x.startsWith('> ')), want = sel.findIndex(pred);
+  if (want < 0) { console.log('  ✗ 菜单里没有要找的那行'); return; }
+  await key(want > cur ? 40 : 38, Math.abs(want - cur));
+};
+/* 一段时间里字幕出现过哪些（取样那一刻可能正好在两句之间） */
+const subsSeen = async (ms) => { const seen = new Set(); const t0 = Date.now();
+  while (Date.now() - t0 < ms) { for (const sel of ['#sub', '#subtop']) { const x = await txt(sel); if (x) seen.add(x); } await sleep(250); }
+  return [...seen].join(' / ') || '（没有）'; };
 
 await page.goto('http://localhost:8768/app/index.html');
 await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
 await page.reload();
 await sleep(1500);
 await shot('1-home');
+/* ONLY=mkv：只跑最后 MKV 那一段 */
+if (!process.env.ONLY) {
 /* 网格只在露不全时才滚：一路往下再一路往上，每一步记焦点在第几排、网格滚了多少（看得见的几排之间移动应该不滚） */
 {
   const pos = async () => page.evaluate(() => { const f = document.querySelector('.card.focus');
@@ -186,7 +239,7 @@ console.log('  跳 +20 秒之后 t=' + await page.evaluate(() => document.getEle
 await key(10009); await sleep(800);
 await shot('13-web-back');
 /* 网页列表当来源：来源栏最上面是「示例站 收藏」→ 要登录 → 先输错再输对 → 列表 → 往下翻第二页 → 放一个 */
-await key(37, 3); await key(38, 8); await sleep(300);
+await key(37, 3); await key(38, 8); await key(40); await sleep(300);      // 最上面是「搜索」，下一个才是网页列表
 await shot('14-rail-web');
 await key(13); await sleep(1200);
 await shot('15-login');
@@ -203,4 +256,81 @@ await shot('18-weblist-more');
 await key(13); await sleep(2500);
 console.log('  列表里的片子 t=' + await page.evaluate(() => document.getElementById('v').currentTime.toFixed(1)));
 await key(10009); await sleep(800);
+
+/* ---------- 搜索 → 双音轨片子：菜单、换音轨、字幕（片子里的、群里的文件）、字幕时间 ---------- */
+await search('双音轨');
+await shot('19-search');
+console.log('  搜索结果 ' + await page.evaluate(() => document.querySelectorAll('.card').length) + ' 张卡片：' + await txt('.card .title'));
+await key(13); await sleep(3500);
+await shot('20-multi');
+await hold(13, 900); await sleep(300);
+await shot('21-menu');
+console.log('  菜单：\n    ' + (await menuRows()).join('\n    '));
+const t1 = await vt();
+await key(40); await key(13); await sleep(4000);
+const t2 = await vt();
+console.log(`  换音轨：${t1.toFixed(1)} → 重开后 ${t2.toFixed(1)}（应该接着 ${t1.toFixed(1)} 往后放）`);
+await hold(13, 900); await sleep(300);
+console.log('  换完再开菜单：\n    ' + (await menuRows()).join('\n    '));
+/* 片子里的中文字幕：菜单里「字幕」下面第二行 */
+await goto(r => r.includes('片子里')); await key(13); await sleep(2500);      // zh.srt 第三条从 10 秒开始
+console.log('  内嵌字幕 t=' + (await vt()).toFixed(1) + '：' + await txt('#sub'));
+await shot('22-sub-emb');
+await hold(13, 900); await sleep(300);
+await goto(r => r.includes('群里的文件')); await key(13); await sleep(1500);
+console.log('  外挂字幕（GBK）t=' + (await vt()).toFixed(1) + '：' + await txt('#sub'));
+await shot('23-sub-file');
+await hold(13, 900); await sleep(300);
+await goto(r => r.includes('秒 →')); await key(39, 2); await sleep(300);
+console.log('  字幕时间：' + (await menuRows()).filter(r => r.includes('秒')).join(''));
+await shot('24-offset');
+await key(10009); await sleep(300);
+await key(13); await sleep(600);
+await shot('25-paused-sub');
+await key(10009); await sleep(800);
+
+/* ---------- 下一集：搜「测试剧」，放第 1 集，跳到快结束，等倒计时 ---------- */
+await search('测试剧');
+console.log('  搜「测试剧」：' + await page.evaluate(() => [...document.querySelectorAll('.card .title')].map(e => e.textContent).join(' / ')));
+await key(39); await key(13); await sleep(3000);
+await key(39); await sleep(1200);      // +15 秒，落在结尾前 3 秒
+await sleep(4500);
+await shot('26-upnext');
+console.log('  放完：' + await txt('#upnext'));
+await sleep(9000);
+console.log('  倒计时之后在放：' + await txt('#ov-title') + ' t=' + (await vt()).toFixed(1));
+await shot('27-next');
+await key(10009); await sleep(800);
+
+}
+
+/* ---------- MKV（有生成好的测试片才跑） ---------- */
+if (extra.some(x => x.path.startsWith('mkv/'))) {
+  await search('MKV');
+  const n = await page.evaluate(() => document.querySelectorAll('.card').length);
+  console.log('  MKV ' + n + ' 个：' + await page.evaluate(() => [...document.querySelectorAll('.card .title')].map(e => e.textContent).join(' / ')));
+  /* 画布上 PGS 字幕的不透明像素有多少 */
+  const pgsPixels = () => page.evaluate(() => { const c = document.getElementById('subpic'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let n = 0; for (let i = 3; i < d.length; i += 4 * 7) if (d[i] > 0) n++; return n; });
+  for (let i = 0; i < n; i++) {
+    if (i) { if (i % 3) await key(39); else { await key(37, 2); await key(40); } }      // 先回第一列再往下（最后一排不满时往下会落到最后一个；第一列再按左键就开来源栏了）
+    await key(13); await sleep(4000);
+    const a = await vt(), title = await txt('#ov-title');
+    let extraInfo = '';
+    if (/m_multi/.test(title)) {
+      await hold(13, 900); await sleep(300);
+      console.log('  m_multi 的菜单：' + (await menuRows()).join(' | '));
+      await goto(r => r.includes('英语') && r.includes('片子里')); await key(13);
+      extraInfo = '，选英语 ASS 之后 8 秒里出现过的字幕：' + await subsSeen(8000);
+    }
+    if (/m_pgs/.test(title)) {
+      let best = 0, at = 0; for (let k = 0; k < 16; k++) { const p = await pgsPixels(); if (p > best) { best = p; at = await vt(); if (best > 50) await shot('29-pgs'); } await sleep(250); }
+      extraInfo = '，PGS 画布上最多 ' + best + ' 个采样点有字（t=' + at.toFixed(1) + '）';
+    }
+    await key(39); await sleep(2500);
+    console.log(`  MKV #${i} ${title}：4 秒后 t=${a.toFixed(1)}，快进之后 t=${(await vt()).toFixed(1)}，错误：${await txt('#perr') || '无'}，字幕：${await txt('#sub') || '—'}${extraInfo}`);
+    await shot('28-mkv-' + i);
+    await key(10009); await sleep(800);
+  }
+}
 await browser.close();

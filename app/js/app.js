@@ -180,13 +180,18 @@
 
     var KIND = { self: "", group: "群", channel: "频道", user: "私聊", web: "网页" };
 
-    function railItems() { return S.sources.concat([{ id: "__logout", title: "退出登录", kind: "" }]); }
+    /* 来源栏最上面是「搜索」，最下面是「退出登录」 */
+    function railItems() {
+        var sx = { id: "__search", title: S.src && S.src.kind === "search" ? "搜索：" + S.src.query : "搜索", kind: "" };
+        return [sx].concat(S.sources, [{ id: "__logout", title: "退出登录", kind: "" }]);
+    }
 
     function renderRail() {
         $("home").classList.toggle("railopen", S.zone === "rail");
         var list = railItems(), html = "";
         list.forEach(function (s, i) {
-            var cls = "src" + (S.src && s.id === S.src.id ? " cur" : "") + (S.zone === "rail" && i === S.railFocus ? " focus" : "");
+            var cur = S.src && (s.id === S.src.id || (s.id === "__search" && S.src.kind === "search"));
+            var cls = "src" + (cur ? " cur" : "") + (S.zone === "rail" && i === S.railFocus ? " focus" : "");
             html += "<div class='" + cls + "'>" + (KIND[s.kind] ? "<span class='k'>" + KIND[s.kind] + "</span>" : "") + esc(s.title) + "</div>";
         });
         $("rail-list").innerHTML = html;
@@ -196,8 +201,8 @@
 
     /* opts.quiet：开机进上次的来源时，要登录的不自动弹登录框（用户 2026-10-02：每次开机都被它挡住），按确认才弹 */
     async function openSource(src, opts) {
-        S.src = { id: src.id, title: src.title, kind: src.kind, url: src.url };
-        Store.setLastSource(S.src);
+        S.src = { id: src.id, title: src.title, kind: src.kind, url: src.url, query: src.query };
+        if (src.kind !== "search") { Store.setLastSource(S.src); }      // 开机不重新搜一遍，进上次的群
         var g = ++S.gen;
         S.items = []; S.next = undefined; S.total = 0; S.focus = 0; S.gridOff = 0; S.loading = true;
         $("src-title").textContent = src.title;
@@ -206,6 +211,7 @@
         renderRail();
         var t0 = performance.now(), page, links;
         if (src.kind === "web") { return openWebList(S.src, g, t0, opts || {}); }
+        if (src.kind === "search") { return openSearch(S.src, g, t0); }
         /* 群里发的网站链接（web.js）跟视频混在一起按时间排。只取最近 40 条带链接的消息，翻页只翻视频 */
         var linksP = TG.links(src.id, 40).catch(function (e) { R("来源「" + src.title + "」取链接出错 " + errStr(e)); return []; });
         try {
@@ -223,7 +229,7 @@
         S.loading = false;
         syncWebSources(src, links.filter(function (l) { return l.kind === "weblist"; }));
         links = links.filter(function (l) { return l.kind === "web"; });
-        S.items = page.items.concat(links).sort(function (a, b) { return b.date - a.date; });
+        S.items = withDur(page.items).concat(links).sort(function (a, b) { return b.date - a.date; });
         S.next = page.next;
         S.total = page.total + links.length;
         /* 焦点落在最近看过的那一条 */
@@ -258,14 +264,93 @@
             return;
         }
         try {
-            var page = await TG.videos(S.src.id, S.next, 40);
+            var page = S.src.kind === "search" ? await TG.search(S.src.query, S.next, 40) : await TG.videos(S.src.id, S.next, 40);
             if (g !== S.gen) { return; }
-            S.items = S.items.concat(page.items);
-            S.next = page.items.length ? page.next : undefined;
+            S.items = S.items.concat(withDur(page.items));
+            S.next = page.next;
             renderGrid();
         } catch (e) {
             R("翻页出错 " + errStr(e));
         } finally { if (g === S.gen) { S.loading = false; } }
+    }
+
+    /* 当文件发的（MKV 之类）Telegram 不知道时长：放过一次记下来的 */
+    function withDur(items) {
+        items.forEach(function (it) { if (it.asFile && !it.duration) { it.duration = Store.dur(it.fileKey); } });
+        return items;
+    }
+
+    /* ---------- 搜索（所有会话里的视频）---------- */
+
+    async function openSearch(src, g, t0) {
+        var page;
+        try { page = await TG.search(src.query, undefined, 40); }
+        catch (e) {
+            if (g !== S.gen) { return; }
+            S.loading = false;
+            R("搜索「" + src.query + "」出错 " + errStr(e));
+            $("empty").innerHTML = "搜索出错：" + esc(errStr(e)) + "<br>按确认重试";
+            return;
+        }
+        if (g !== S.gen) { return; }
+        S.loading = false;
+        S.items = withDur(page.items);
+        S.next = page.next;
+        S.total = page.total;
+        R("搜索「" + src.query + "」" + Math.round(performance.now() - t0) + "ms，" + S.items.length + " 个" + (page.next ? "，还有" : ""));
+        renderGrid();
+        if (!S.items.length) { $("empty").innerHTML = "没搜到「" + esc(src.query) + "」。<br>按 ← 打开来源栏，再选「搜索」换个词。"; }
+    }
+
+    S.sx = { focus: -1 };
+    function openSearchBox() {
+        S.screen = "search";
+        var list = Store.searches(), html = "";
+        list.forEach(function (q, i) { html += "<span class='q' id='sq" + i + "'>" + esc(q) + "</span>"; });
+        $("sx-recent").innerHTML = html;
+        $("sx-lab").style.display = list.length ? "block" : "none";
+        $("sx-q").value = "";
+        S.sx.focus = -1;
+        $("sx").classList.add("on");
+        setTimeout(function () { $("sx-q").focus(); }, 50);
+    }
+    function closeSearchBox() {
+        $("sx").classList.remove("on");
+        try { document.activeElement.blur(); } catch (e) {}
+        S.screen = "home";
+    }
+    function runSearch(q) {
+        q = q.trim();
+        if (!q) { return; }
+        Store.addSearch(q);
+        closeSearchBox();
+        S.zone = "grid";
+        openSource({ id: "__search:" + q, title: "搜索「" + q + "」", kind: "search", query: q });
+    }
+    $("sx-q").addEventListener("keydown", function (e) {
+        if (e.keyCode !== 13 && e.keyCode !== 65376) { return; }
+        e.preventDefault();
+        e.stopPropagation();      // 不然冒泡到 document 的按键处理
+        runSearch(this.value);
+    });
+    function searchKey(k) {
+        var inInput = document.activeElement === $("sx-q"), n = Store.searches().length;
+        if (k === 10009) {
+            /* 输入框里按返回先收起键盘（同网页登录框） */
+            if (inInput) { document.activeElement.blur(); return; }
+            closeSearchBox();
+            return;
+        }
+        if (inInput) { if (k === 40 && n) { document.activeElement.blur(); S.sx.focus = 0; drawRecent(); } return; }
+        if (k === 37 && S.sx.focus > 0) { S.sx.focus--; }
+        else if (k === 39 && S.sx.focus + 1 < n) { S.sx.focus++; }
+        else if (k === 40 && S.sx.focus < 0 && n) { S.sx.focus = 0; }
+        else if (k === 38) { S.sx.focus = -1; $("sx-q").focus(); }
+        else if (k === 13) { if (S.sx.focus >= 0) { runSearch(Store.searches()[S.sx.focus]); } else { $("sx-q").focus(); } return; }
+        drawRecent();
+    }
+    function drawRecent() {
+        document.querySelectorAll("#sx-recent .q").forEach(function (el, i) { el.classList.toggle("focus", i === S.sx.focus); });
     }
 
     /* ---------- 网页列表当来源（web.js）：群里发的收藏、分类链接 ---------- */
@@ -412,7 +497,8 @@
         var p = Store.getProgress(it.fileKey);
         var x = LEFT + (i % COLS) * (CARD_W + GAP_X), y = TOP + Math.floor(i / COLS) * PITCH_Y;
         var th = S.thumbs[it.fileKey];
-        var meta = [it.kind === "web" ? "网页 · " + it.site : fmtSize(it.size), fmtDate(it.date)].filter(Boolean).join(" · ");
+        var ext = it.asFile && /\.(mkv|webm|mov|m4v)$/i.exec(it.fileName || "");
+        var meta = [S.src && S.src.kind === "search" ? it.chatTitle : "", it.kind === "web" ? "网页 · " + it.site : (ext ? ext[1].toUpperCase() + " · " : "") + fmtSize(it.size), fmtDate(it.date)].filter(Boolean).join(" · ");
         if (p && p.done) { meta = "看完了 · " + meta; }
         else if (p && p.t > 0) { meta = "看到 " + fmtTime(p.t) + " · " + meta; }
         return "<div class='card' id='c" + i + "' style='left:" + x + "px;top:" + y + "px'>" +
@@ -527,7 +613,8 @@
 
     /* 兜底：电影去维基百科找海报；不是电影或者没找到 → 记下「没有封面」，只显示片名卡片 */
     function fallbackPoster(it) {
-        if (it.duration < 2400 || Store.noPoster(it.fileKey)) { Cover.keepNone(it); return; }
+        /* 当文件发的没有时长：1GB 以上的当电影 */
+        if ((it.duration || (it.asFile && it.size > 1073741824 ? 3600 : 0)) < 2400 || Store.noPoster(it.fileKey)) { Cover.keepNone(it); return; }
         Cover.poster(it).then(function (ps) {
             if (ps) { R("海报「" + it.title + "」← " + ps.info); setThumb(it, ps); }
             else { Store.markNoPoster(it.fileKey); Cover.keepNone(it); R("海报：维基百科没找到对得上的「" + it.title + "」"); }
@@ -654,7 +741,7 @@
     var mse = Player.create(video, function (s) { Log.report("player", s); }, onPlayerState);
     var webPlayer = Web.player(video, function (s) { Log.report("web", s); }, onPlayerState);
     var player = mse;      // 当前在用的那个：Telegram 的文件 → mse，网页链接 → webPlayer
-    var saveTimer = 0, ovTick = 0;
+    var saveTimer = 0, ovTick = 0, subTimer = 0;
 
     function onPlayerState(phase, msg) {
         if (S.screen !== "player") { return; }
@@ -662,42 +749,62 @@
         else if (phase === "buffering") { spin(true, "缓冲中…"); }
         else if (phase === "playing") { spin(false); }
         else if (phase === "note") { toast(msg, 5000); }
-        else if (phase === "ended") { finishPlayback(true); }
+        else if (phase === "ended") { onEnded(); }
         else if (phase === "error") { showError(msg); }
     }
 
     function spin(on, text) { $("spin").classList.toggle("on", !!on); $("spin-text").textContent = text || ""; }
 
-    async function play(it) {
+    /* opts.reopen：同一部片在当前位置重开（换音轨），字幕、菜单的状态留着 */
+    async function play(it, opts) {
+        opts = opts || {};
+        var again = !!opts.reopen && S.playing === it;
         S.screen = "player";
         S.playing = it;
         S.pending = null;
+        hideUpnext();
+        closeMenu();
         $("home").classList.add("hide");
         $("player").classList.add("on");
         $("perr").style.display = "none";
         $("seekhint").style.display = "none";
         $("ov-title").textContent = it.title;
+        if (!again) { resetSubs(it); }
         showOverlay();
-        spin(true, "正在打开…");
+        spin(true, again ? "换音轨…" : "正在打开…");
         var p = Store.getProgress(it.fileKey);
-        var startAt = p && !p.done && p.t > 20 ? p.t : 0;
+        var startAt = again ? opts.startAt : p && !p.done && p.t > 20 ? p.t : 0;
         await Cover.cancel();
+        if (!again) { findSubFiles(it); }
         if (it.kind === "web") { playWeb(it, startAt); return; }
         player = mse;
         var moov = await Store.getMoov(it.fileKey);
         if (S.playing !== it) { return; }
-        R("播放「" + it.title + "」" + fmtSize(it.size) + " " + fmtTime(it.duration) + (startAt ? "，从 " + fmtTime(startAt) + " 接着放" : "") + (moov ? "，moov 有缓存" : ""));
-        if (startAt) { toast("从 " + fmtTime(startAt) + " 接着放"); }
+        var pref = Store.getPrefs(it.fileKey);
+        R((again ? "换音轨重开「" : "播放「") + it.title + "」" + fmtSize(it.size) + " " + fmtTime(it.duration) + (it.asFile ? "（文件 " + (it.fileName || it.mime) + "）" : "") +
+          (startAt ? "，从 " + fmtTime(startAt) + (again ? "" : " 接着放") : "") + (moov ? "，" + (moov.mkv ? "MKV 头" : "moov") + "有缓存" : "") + (opts.audio || pref.audio ? "，音轨 " + (opts.audio || pref.audio) : ""));
+        if (startAt && !again) { toast("从 " + fmtTime(startAt) + " 接着放"); }
         var t0 = performance.now();
         player.open(TG.source(it), {
             startAt: startAt,
+            exact: again,
             moov: moov,
-            onMoov: function (m) { Store.putMoov(it.fileKey, m); }
+            audio: opts.audio || pref.audio,
+            onMoov: function (m) { Store.putMoov(it.fileKey, m); },
+            onTracks: function (tr) { if (S.playing === it) { gotTracks(it, tr); } },
+            onSub: function (key, pts, dur, data, extra) {
+                var e = S.subs && S.subs.it === it && S.subs.emb[key];
+                /* 图形字幕（PGS）一个显示集几 KB 到几十 KB、一部片几千个，蓝光 remux 常带四五条：定下显示哪条之后只存那一条
+                 * （中途换到别的图形字幕轨时让播放器重读，见 applySub）。文字的都存，换轨马上有 */
+                if (e && (e.track.kind !== "image" || !S.subs.decided || S.subs.on === key)) { e.track.add(pts, dur, data, extra); }
+            }
         }).then(function () {
             if (S.playing !== it) { return; }
             R("出画面 " + Math.round(performance.now() - t0) + "ms");
             spin(false);
             hideOverlaySoon();
+            /* 当文件发的片子，Telegram 不知道时长：记下来，网格上的卡片和续播进度条要用 */
+            if (it.asFile && player.duration()) { it.duration = player.duration(); Store.setDur(it.fileKey, it.duration); }
         }).catch(function (e) {
             if (S.playing === it) { showError(errStr(e)); }
         });
@@ -705,6 +812,8 @@
         saveTimer = setInterval(saveProgress, 5000);
         clearInterval(ovTick);
         ovTick = setInterval(drawOverlay, 250);
+        clearInterval(subTimer);
+        subTimer = setInterval(function () { if (S.subR) { S.subR.tick(video.currentTime); } }, 100);
     }
 
     function playWeb(it, startAt) {
@@ -733,19 +842,30 @@
         if (it && d && video.currentTime > 1) { Store.setProgress(it.fileKey, video.currentTime, d, it.title); }
     }
 
-    function finishPlayback(ended) {
+    /* 停下这部片（存进度、关播放器、清字幕），不管接下来去哪 */
+    function stopPlayback(ended) {
         var it = S.playing;
-        if (!it) { return; }
+        if (!it) { return null; }
         if (ended) { Store.setProgress(it.fileKey, player.duration(), player.duration(), it.title); }
         else { saveProgress(); }
         clearInterval(saveTimer);
         clearInterval(ovTick);
+        clearInterval(subTimer);
         clearTimeout(S.pendTimer);
+        hideUpnext();
+        closeMenu();
+        if (S.subR) { S.subR.set(null); }
         S.playing = null;
         S.pending = null;
         player.close();
         spin(false);
-        $("ov").classList.remove("on");
+        ovShow(false);
+        return it;
+    }
+
+    function finishPlayback(ended) {
+        var it = stopPlayback(ended);
+        if (!it) { return; }
         $("player").classList.remove("on");
         $("home").classList.remove("hide");
         S.screen = "home";
@@ -767,15 +887,17 @@
         R("放不了：" + msg);
     }
 
+    /* 浮层出来时字幕抬到它上面（#player.ovon） */
+    function ovShow(on) { $("ov").classList.toggle("on", on); $("player").classList.toggle("ovon", on); }
     function showOverlay() {
-        $("ov").classList.add("on");
+        ovShow(true);
         drawOverlay();
         clearTimeout(S.ovTimer);
     }
     function hideOverlaySoon() {
         clearTimeout(S.ovTimer);
         S.ovTimer = setTimeout(function () {
-            if (!video.paused && S.pending === null) { $("ov").classList.remove("on"); }
+            if (!video.paused && S.pending === null) { ovShow(false); }
         }, 4000);
     }
 
@@ -790,6 +912,310 @@
         for (var i = 0; i < b.length; i++) { if (b.start(i) <= video.currentTime + 0.5 && b.end(i) > video.currentTime) { end = b.end(i); } }
         $("ov-buf").style.width = Math.min(100, end / d * 100) + "%";
         $("ov-time").textContent = fmtTime(t) + " / " + fmtTime(d) + (video.paused && S.pending === null ? "　已暂停" : "");
+    }
+
+    /* ---------- 音轨、字幕 ---------- */
+
+    var LANG = { chi: "中文", zho: "中文", zh: "中文", cmn: "国语", yue: "粤语", eng: "英语", en: "英语", jpn: "日语", ja: "日语",
+                 kor: "韩语", ko: "韩语", fre: "法语", fra: "法语", fr: "法语", ger: "德语", deu: "德语", de: "德语", spa: "西班牙语", es: "西班牙语",
+                 ita: "意大利语", it: "意大利语", rus: "俄语", ru: "俄语", tha: "泰语", th: "泰语", por: "葡萄牙语", pt: "葡萄牙语", vie: "越南语", hin: "印地语" };
+    function langName(l) {
+        l = String(l || "").toLowerCase();
+        if (/^zh-?(hans|cn|sg)/.test(l)) { return "简体中文"; }
+        if (/^zh-?(hant|tw|hk|mo)/.test(l)) { return "繁体中文"; }
+        return LANG[l] || LANG[l.split("-")[0]] || "";
+    }
+    function isZh(x) {
+        return /^(chi|zho|zh|cmn|yue)\b/i.test(x.lang || "") || /中|国语|國語|普通话|粤|简|繁|chs|cht|chinese|mandarin|cantonese/i.test(x.name || "");
+    }
+    var CODEC = { "ac-3": "杜比 AC-3", "ec-3": "杜比 E-AC-3", opus: "Opus", flac: "FLAC", "mp4a.6B": "MP3", "mp4a.69": "MP3" };
+    function codecName(c) { c = String(c || ""); return CODEC[c] || (/^mp4a\.40/.test(c) ? "AAC" : c.replace(/^A_/, "")); }
+    function chName(n) { return n === 1 ? "单声道" : n === 2 ? "立体声" : n === 6 ? "5.1" : n === 8 ? "7.1" : n ? n + " 声道" : ""; }
+    function audioLabel(a, i) {
+        var l = langName(a.lang), nm = a.name && a.name !== l ? a.name : "";
+        return [l || nm || "音轨 " + (i + 1), l && nm ? nm : "", codecName(a.codec), chName(a.channels)].filter(Boolean).join(" · ");
+    }
+    function subLabel(t, i) {
+        var l = langName(t.lang), nm = t.name && t.name !== l ? t.name : "";
+        return [l || nm || "字幕 " + (i + 1), l && nm ? nm : "", /PGS/.test(t.codec) && !/图形/.test(nm) ? "图形" : ""].filter(Boolean).join(" · ") + "（片子里）";
+    }
+
+    /* S.subs：这部片子的字幕状态。emb = 片子里的轨（key → {info, track, label}）；files = 群里找到的字幕文件；
+     * on = 正在显示的（"" 关，"s:3" 片子里的，"f:文件名" 群里的文件） */
+    S.subR = null;
+    function resetSubs(it) {
+        if (!S.subR && window.Subs) { S.subR = Subs.renderer($("sub"), $("subtop"), $("subpic")); }
+        S.subs = { it: it, emb: {}, embList: [], files: [], fileTracks: {}, on: "", gotTracks: false, gotFiles: false, decided: false,
+                   off: Store.getPrefs(it.fileKey).off || 0 };
+        S.tracks = null;
+        if (S.subR) { S.subR.set(null); S.subR.offset(S.subs.off); }
+    }
+    function gotTracks(it, tr) {
+        var ss = S.subs;
+        S.tracks = tr;
+        tr.subs.forEach(function (t, i) {
+            if (ss.emb[t.key]) { return; }
+            ss.emb[t.key] = { info: t, track: Subs.track(t.codec, t.codecPrivate), label: subLabel(t, i) };
+            ss.embList.push(t.key);
+        });
+        ss.gotTracks = true;
+        if (tr.audio.length > 1) { R("音轨：" + tr.audio.map(function (a, i) { return (a.current ? "▶" : "") + audioLabel(a, i) + (a.ok ? "" : "（" + a.why + "）"); }).join("，")); }
+        if (tr.subs.length) { R("片子里的字幕：" + tr.subs.map(function (t, i) { return subLabel(t, i) + " " + t.codec + (t.isDefault ? " 默认" : "") + (t.isForced ? " 强制" : ""); }).join("，")); }
+        decideSubs();
+    }
+    function findSubFiles(it) {
+        if (it.kind === "web" || !it.msg) { S.subs.gotFiles = true; decideSubs(); return; }
+        TG.subtitlesFor(it).then(function (list) {
+            if (!S.subs || S.subs.it !== it) { return; }
+            S.subs.files = list;
+            S.subs.gotFiles = true;
+            if (list.length) { R("群里的字幕文件：" + list.map(function (f) { return f.name + "（" + f.score.toFixed(1) + "）"; }).join("，")); }
+            decideSubs();
+        }).catch(function (e) { R("找字幕文件出错 " + errStr(e)); S.subs.gotFiles = true; decideSubs(); });
+    }
+
+    /* 默认开哪个：这部片子上次选过的 → 强制字幕 → 对白不是中文时，中文字幕（片子里的优先，再看群里对得上名字的文件）→ 关。
+     * 对白是中文就不自动开（国产片多半是硬字幕）。等音轨和字幕文件都知道了才定。 */
+    function decideSubs() {
+        var ss = S.subs;
+        if (!ss || ss.decided || !ss.gotTracks || !ss.gotFiles) { return; }
+        ss.decided = true;
+        var pref = Store.getPrefs(ss.it.fileKey);
+        if (pref.sub !== undefined) { if (pref.sub) { applySub(pref.sub, "上次选的"); } return; }
+        var emb = ss.embList.map(function (k) { return ss.emb[k].info; });
+        var forced = emb.filter(function (t) { return t.isForced; })[0];
+        if (forced) { applySub(forced.key, "强制字幕"); return; }
+        var cur = S.tracks && S.tracks.audio.filter(function (a) { return a.current; })[0];
+        if (cur && isZh(cur)) { if (emb.length || ss.files.length) { toast("有字幕，长按确认键可以打开", 4000); } return; }
+        var zh = emb.filter(isZh), pick = zh.filter(function (t) { return t.isDefault; })[0] || zh[0];
+        if (pick) { applySub(pick.key, "中文字幕"); return; }
+        var f = ss.files[0];
+        if (f && f.score >= 3 && (!f.lang || f.lang !== "英文")) { applySub("f:" + f.name, "名字对得上的字幕文件"); return; }
+        if (emb.length || ss.files.length) { toast("有字幕，长按确认键可以选", 4000); }
+    }
+
+    /* why 有值 = 自动选的（不记）；没有 = 用户在菜单里选的（记下来，下次这部片子直接用） */
+    function applySub(key, why) {
+        var ss = S.subs, it = ss.it;
+        if (!why) { Store.setPrefs(it.fileKey, { sub: key }); }
+        ss.on = key;
+        if (!key) { S.subR.set(null); if (!why) { toast("字幕关了"); } return; }
+        if (key.indexOf("s:") === 0) {
+            var e = ss.emb[key];
+            if (!e) { ss.on = ""; return; }
+            S.subR.set(e.track);
+            R("字幕 → " + e.label + (why ? "（" + why + "）" : ""));
+            if (e.track.kind === "image" && !why) { player.refetch("换图形字幕，重读"); }
+            toast("字幕：" + e.label.replace("（片子里）", ""));
+            return;
+        }
+        var name = key.slice(2), f = ss.files.filter(function (x) { return x.name === name; })[0];
+        if (ss.fileTracks[name]) { S.subR.set(ss.fileTracks[name]); toast("字幕：" + name); return; }
+        if (!f) { ss.on = ""; return; }
+        var t0 = performance.now();
+        TG.download(f.doc).then(function (bytes) {
+            var text = Subs.decode(new Uint8Array(bytes)), ev = Subs.parse(text, name);
+            var tr = Subs.track("file", null);
+            tr.addEvents(ev);
+            ss.fileTracks[name] = tr;
+            R("字幕文件「" + name + "」" + Math.round(bytes.length / 1024) + "KB " + ev.length + " 条，" + Math.round(performance.now() - t0) + "ms" + (why ? "（" + why + "）" : ""));
+            if (S.subs !== ss || ss.on !== key) { return; }
+            if (!ev.length) { toast("字幕文件「" + name + "」里读不出字幕"); ss.on = ""; return; }
+            S.subR.set(tr);
+            toast("字幕：" + (f.lang ? f.lang + " · " : "") + name);
+        }).catch(function (e) {
+            R("字幕文件「" + name + "」下载出错 " + errStr(e));
+            if (S.subs === ss && ss.on === key) { ss.on = ""; toast("字幕文件下不下来：" + errStr(e)); }
+        });
+    }
+    function setSubOffset(d) {
+        var ss = S.subs;
+        ss.off = Math.round((ss.off + d) * 10) / 10;
+        S.subR.offset(ss.off);
+        Store.setPrefs(ss.it.fileKey, { off: ss.off });
+    }
+
+    /* 换音轨：在当前位置重开（见 player.js 开头），停在原来那一秒 */
+    function switchAudio(key) {
+        var it = S.playing, t = video.currentTime;
+        if (!it || (S.tracks && S.tracks.audio.some(function (a) { return a.current && a.key === key; }))) { return; }
+        Store.setPrefs(it.fileKey, { audio: key });
+        saveProgress();
+        play(it, { reopen: true, startAt: t, audio: key });
+    }
+
+    /* ---------- 菜单（播放时长按确认键）---------- */
+
+    S.menu = null;
+    function menuRows() {
+        var rows = [], tr = S.tracks || { audio: [], subs: [] }, ss = S.subs;
+        if (tr.audio.length > 1) {
+            rows.push({ h: "音轨" });
+            tr.audio.forEach(function (a, i) {
+                rows.push({ label: audioLabel(a, i) + (a.ok ? "" : "（" + a.why + "）"), ck: a.current, dis: !a.ok, act: function () { closeMenu(); switchAudio(a.key); } });
+            });
+        }
+        rows.push({ h: "字幕" });
+        rows.push({ label: "关", ck: !ss.on, act: function () { applySub(""); closeMenu(); } });
+        ss.embList.forEach(function (k) {
+            var e = ss.emb[k];
+            rows.push({ label: e.label, ck: ss.on === k, act: function () { applySub(k); closeMenu(); } });
+        });
+        ss.files.forEach(function (f) {
+            var k = "f:" + f.name;
+            rows.push({ label: (f.lang ? f.lang + " · " : "") + f.name + "（群里的文件）", ck: ss.on === k, act: function () { applySub(k); closeMenu(); } });
+        });
+        if (!ss.embList.length && !ss.files.length) {
+            rows.push({ label: ss.gotFiles ? "没有找到字幕" : "正在找群里的字幕文件…", dis: true });
+        }
+        if (ss.on) {
+            rows.push({ h: "字幕时间（和对白对不上时调）" });
+            rows.push({ label: "← " + (ss.off > 0 ? "推迟 " + ss.off.toFixed(1) : ss.off < 0 ? "提前 " + (-ss.off).toFixed(1) : "不调 0.0") + " 秒 →", adjust: true });
+        }
+        var nx = nextEpisodeLoaded(S.playing);
+        if (nx) {
+            rows.push({ h: "下一集" });
+            rows.push({ label: nx.title, act: function () { closeMenu(); playNext(nx); } });
+        }
+        return rows;
+    }
+    function openMenu() {
+        if (!S.subs || $("perr").style.display === "block") { return; }
+        S.menu = { rows: menuRows(), focus: -1 };
+        var r = S.menu.rows, cur = r.findIndex(function (x) { return x.ck && !x.dis; });
+        S.menu.focus = cur >= 0 ? cur : r.findIndex(function (x) { return !x.h && !x.dis; });
+        drawMenu();
+        $("menu").classList.add("on");
+    }
+    function closeMenu() { S.menu = null; $("menu").classList.remove("on"); }
+    function drawMenu() {
+        var m = S.menu, html = "";
+        m.rows.forEach(function (x, i) {
+            if (x.h) { html += "<div class='mh'>" + esc(x.h) + "</div>"; return; }
+            html += "<div class='mi" + (x.dis ? " dis" : "") + (i === m.focus ? " focus" : "") + "' id='mi" + i + "'><span class='ck'>" + (x.ck ? "✓" : "") + "</span>" + esc(x.label) + "</div>";
+        });
+        $("menu-list").innerHTML = html;
+        var el = $("mi" + m.focus), y = el ? el.offsetTop : 0;
+        $("menu-list").style.transform = "translateY(" + (-Math.max(0, y - 700)) + "px)";
+    }
+    function menuKey(k) {
+        var m = S.menu, r = m.rows, i;
+        if (k === 10009) { closeMenu(); return; }
+        if (k === 38 || k === 40) {
+            for (i = m.focus + (k === 40 ? 1 : -1); i >= 0 && i < r.length; i += (k === 40 ? 1 : -1)) {
+                if (!r[i].h && !r[i].dis) { m.focus = i; break; }
+            }
+            drawMenu();
+            return;
+        }
+        var x = r[m.focus];
+        if (!x) { return; }
+        if (x.adjust && (k === 37 || k === 39)) { setSubOffset(k === 39 ? 0.5 : -0.5); m.rows = menuRows(); drawMenu(); return; }
+        if (k === 13 && x.act) { x.act(); }
+    }
+
+    /* ---------- 下一集 ---------- */
+
+    var CN_NUM = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+    function cnNum(s) {
+        if (/^\d+$/.test(s)) { return +s; }
+        var n = 0, cur = 0;
+        for (var i = 0; i < s.length; i++) {
+            var c = s[i];
+            if (c === "百") { n += (cur || 1) * 100; cur = 0; }
+            else if (c === "十") { n += (cur || 1) * 10; cur = 0; }
+            else if (CN_NUM[c] !== undefined) { cur = CN_NUM[c]; }
+            else { return NaN; }
+        }
+        return n + cur;
+    }
+    /* 集数：S01E02、第3集 / 第三话、EP02 / E02、[02]、「 - 02」。剧名 = 去掉集数（和画质、方括号之类）剩下的，用来认同一部剧 */
+    var EP_PATTERNS = [
+        [/s(\d{1,2})\s*e(\d{1,3})/i, function (m) { return +m[1] * 1000 + +m[2]; }],
+        [/第\s*([0-9零一二两三四五六七八九十百]+)\s*[集话話回期]/, function (m) { return cnNum(m[1]); }],
+        [/\bep?\.?\s*(\d{1,3})\b/i, function (m) { return +m[1]; }],
+        [/[\[【]\s*(\d{1,3})(?:v\d)?\s*[\]】]/i, function (m) { return +m[1]; }],
+        [/\s-\s(\d{1,3})(?=\s|$|\[|\.)/, function (m) { return +m[1]; }]
+    ];
+    function episodeOf(it) {
+        var srcs = [it.title || "", (it.fileName || "").replace(/\.[a-z0-9]{2,4}$/i, "")];
+        for (var j = 0; j < srcs.length; j++) {
+            for (var i = 0; i < EP_PATTERNS.length; i++) {
+                var m = EP_PATTERNS[i][0].exec(srcs[j]);
+                if (!m) { continue; }
+                var ep = EP_PATTERNS[i][1](m);
+                if (isNaN(ep)) { continue; }
+                var series = (srcs[j].slice(0, m.index) + " " + srcs[j].slice(m.index + m[0].length))
+                    .replace(/\[[^\]]*\]|【[^】]*】|\([^)]*\)/g, " ")
+                    .replace(/\b(2160p|1080[pi]|720p|480p|4k|web-?dl|webrip|blu-?ray|hdtv|x26[45]|hevc|aac|中字|国语|高清)\b/gi, " ")
+                    .replace(/[\s._\-–·|｜:：,，]+/g, "").toLowerCase();
+                if (series.length >= 1) { return { series: series, ep: ep }; }
+            }
+        }
+        return null;
+    }
+    /* 已经加载的列表里，同一部剧、集数比它大的里最小的那一集 */
+    function nextEpisodeLoaded(it) {
+        if (!it) { return null; }
+        var me = episodeOf(it);
+        if (!me) { return null; }
+        var best = null, bestEp = Infinity;
+        S.items.forEach(function (x) {
+            if (x === it || (x.kind === "web") !== (it.kind === "web")) { return; }
+            var e = episodeOf(x);
+            if (e && e.series === me.series && e.ep > me.ep && e.ep < bestEp) { best = x; bestEp = e.ep; }
+        });
+        return best;
+    }
+    /* 没加载到的话往后翻几页再找（新的在前，前面几集在后面的页里） */
+    async function findNext(it) {
+        var nx = nextEpisodeLoaded(it);
+        for (var i = 0; !nx && i < 3 && episodeOf(it) && S.next !== undefined && S.next !== null; i++) {
+            await loadMore();
+            nx = nextEpisodeLoaded(it);
+        }
+        return nx;
+    }
+
+    function onEnded() {
+        var it = S.playing;
+        if (!it) { return; }
+        findNext(it).then(function (nx) {
+            if (S.playing !== it) { return; }
+            if (!nx) { finishPlayback(true); return; }
+            R("放完了，下一集「" + nx.title + "」");
+            showUpnext(nx);
+        });
+    }
+    S.upnext = null;
+    function showUpnext(nx) {
+        closeMenu();
+        var u = S.upnext = { it: nx, left: 8 };
+        $("upnext-t").textContent = nx.title;
+        var draw = function () { $("upnext-k").textContent = u.left + " 秒后开始　·　确认 现在放　·　返回 不放了"; };
+        draw();
+        $("upnext").classList.add("on");
+        clearTimeout(S.ovTimer);
+        ovShow(false);
+        u.timer = setInterval(function () {
+            if (S.upnext !== u) { clearInterval(u.timer); return; }
+            if (--u.left <= 0) { clearInterval(u.timer); playNext(nx); return; }
+            draw();
+        }, 1000);
+    }
+    function hideUpnext() {
+        if (S.upnext) { clearInterval(S.upnext.timer); }
+        S.upnext = null;
+        $("upnext").classList.remove("on");
+    }
+    function playNext(nx) {
+        var cur = S.playing;
+        var ended = cur && player.duration() && video.currentTime > player.duration() - 90;
+        stopPlayback(ended);
+        if (cur) { var ci = S.items.indexOf(cur), el = ci >= 0 && $("c" + ci); if (el) { el.outerHTML = cardHtml(cur, ci); } }
+        var i = S.items.indexOf(nx);
+        if (i >= 0) { S.focus = i; }
+        play(nx);
     }
 
     /* 快进快退：连按的步长累加，停手 0.7 秒才真的跳（每跳一次可能要重新下载）。
@@ -854,6 +1280,7 @@
             else if (k === 39) { S.zone = "grid"; renderRail(); updateFocus(); }
             else if (k === 13) {
                 var s = list[S.railFocus];
+                if (s.id === "__search") { S.zone = "grid"; renderRail(); updateFocus(); openSearchBox(); return; }
                 if (s.id === "__logout") {
                     if (Date.now() - S.logoutAt < 3000) {
                         R("退出登录");
@@ -877,7 +1304,7 @@
         } else if (k === 39) { if (S.focus + 1 < n && (S.focus + 1) % COLS) { S.focus++; } }
         else if (k === 38) { if (S.focus >= COLS) { S.focus -= COLS; } }
         else if (k === 40) { S.focus = Math.min(n - 1, S.focus + COLS); }
-        else if (k === 13) { play(S.items[S.focus]); return; }
+        else if (k === 13) { S.enterArmed = false; play(S.items[S.focus]); return; }
         else { return; }
         updateFocus();
     }
@@ -885,26 +1312,62 @@
     function toRail() {
         refreshSources(false);
         S.zone = "rail";
-        var i = S.sources.findIndex(function (s) { return S.src && s.id === S.src.id; });
-        S.railFocus = i >= 0 ? i : 0;
+        /* 光标落在当前来源上（搜索结果 → 「搜索」那一项）；第 0 项是「搜索」，没有当前来源就落在第一个群上 */
+        var i = railItems().findIndex(function (s) { return S.src && (s.id === S.src.id || (s.id === "__search" && S.src.kind === "search")); });
+        S.railFocus = i >= 0 ? i : Math.min(1, railItems().length - 1);
         renderRail();
         updateFocus();
     }
 
+    function togglePlay() {
+        player.toggle();
+        showOverlay();
+        if (!video.paused) { hideOverlaySoon(); }
+        saveProgress();
+    }
+
+    /* 确认键：短按暂停 / 继续，按住 650ms 开菜单（和 bilibili 客户端卡片上的长按一样）。松开时才判断是短按，
+     * 按住时遥控器的自动重复不算新的一下。 */
+    var LONG_MS = 650, enterHold = null;
+    function enterDown() {
+        if (enterHold || !S.enterArmed) { return; }
+        var h = enterHold = { at: Date.now(), fired: false };
+        h.timer = setTimeout(function () { if (enterHold === h && S.screen === "player") { h.fired = true; openMenu(); } }, LONG_MS);
+    }
+    /* 在卡片上按确认开始播放：这一下的自动重复和松开都还落在播放器里，不能算「按住开菜单」。等它松开了才认确认键 */
+    S.enterArmed = true;
+    document.addEventListener("keyup", function (e) {
+        if (e.keyCode === 13 && !enterHold) { S.enterArmed = true; }
+        if (e.keyCode !== 13 || !enterHold) { return; }
+        var h = enterHold;
+        enterHold = null;
+        clearTimeout(h.timer);
+        if (h.fired || S.screen !== "player" || S.menu || S.upnext) { return; }
+        if (Date.now() - h.at >= LONG_MS) { openMenu(); } else { togglePlay(); }
+    });
+    window.addEventListener("blur", function () { if (enterHold) { clearTimeout(enterHold.timer); enterHold = null; } });
+
     function playerKey(k) {
+        if (enterHold && k !== 13) { clearTimeout(enterHold.timer); enterHold = null; }
+        /* 按住确认键时遥控器的自动重复：不算新的一下（不然菜单一弹出来，下一个重复就在菜单里按了确认） */
+        if (k === 13 && enterHold) { return; }
+        if (S.upnext) {
+            if (k === 13) { playNext(S.upnext.it); }
+            else if (k === 10009 || k === 413) { hideUpnext(); finishPlayback(true); }
+            return;
+        }
+        if (S.menu) { menuKey(k); return; }
         if (k === 10009 || k === 413) {
             if (S.pending !== null) { clearTimeout(S.pendTimer); S.pending = null; $("seekhint").style.display = "none"; return; }
             finishPlayback(false);
             return;
         }
         if ($("perr").style.display === "block") { return; }
-        if (k === 13 || k === 10252 || k === 415 || k === 19) {
+        if (k === 13) { enterDown(); return; }
+        if (k === 10252 || k === 415 || k === 19) {
             if (k === 415 && !video.paused) { return; }
             if (k === 19 && video.paused) { return; }
-            player.toggle();
-            showOverlay();
-            if (!video.paused) { hideOverlaySoon(); }
-            saveProgress();
+            togglePlay();
         }
         else if (k === 37) { nudge(-stepFor(k, "small")); }
         else if (k === 39) { nudge(stepFor(k, "small")); }
@@ -917,6 +1380,7 @@
         var k = e.keyCode;
         if (S.screen === "password") { return; }
         if (S.screen === "weblogin") { webLoginKey(k); return; }
+        if (S.screen === "search") { searchKey(k); return; }
         if (S.screen === "bootfail") { if (k === 13) { location.reload(); } else if (k === 10009) { exitApp(); } return; }
         if (S.screen === "login") { if (k === 10009) { exitApp(); } return; }
         if (S.screen === "home") { homeKey(k); e.preventDefault(); }

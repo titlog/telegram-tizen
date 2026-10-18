@@ -26,8 +26,14 @@
 
 - **扫码登录**（[mtcute](https://github.com/mtcute/mtcute)，客户端跑在后台线程，界面不卡），会话活得过重新安装。
 - **来源栏**只列有视频的群和频道；视频网格三列，记得每部看到哪里，开机直接进上次的来源。
-- **自己写的 MP4 解析 + MSE 边下边播**：2.6GB 的电影 5.8 秒出画面，跳到没缓冲的地方 0.6 秒；
-  音视频在文件里隔得很远的片子分两路读。
+- **自己写的 MP4 / MKV 解析 + MSE 边下边播**：2.6GB 的电影 5.8 秒出画面，跳到没缓冲的地方 0.6 秒；
+  音视频在文件里隔得很远的片子分两路读。当文件发的视频（MKV、不压缩发的 MP4）也在网格里。
+  MKV 支持 H.264 / HEVC / VP9 / AV1，AAC / AC-3 / E-AC-3 / Opus / FLAC（DTS、TrueHD 电视放不了）。
+- **多音轨、字幕**：播放时长按确认键开菜单，换音轨（国语 / 粤语 / 原声）、开字幕、调字幕时间。
+  字幕可以是片子里带的（MP4 的 mov_text，MKV 的 SRT / ASS / PGS 图形字幕），也可以是和片子发在同一个群里的
+  `.srt` / `.ass` 文件（GBK、Big5 编码也认）。对白不是中文时自动开中文字幕。
+- **连续剧自动放下一集**（认「第 3 集」「S01E03」「EP03」「[03]」），放完倒计时 8 秒。
+- **搜索**：来源栏最上面，在所有群和频道里找视频（片名、说明文字、文件名）。
 - **封面**：缩略图太黑就从片子中间解一帧，电影去维基百科找海报。
 - **网页链接**：群里发的 `.m3u8` / `.mp4` 链接直接放。别的网站要一条站点规则 —— 仓库里**一条都不带**，
   自己写在 `app/js/sites.local.js` 里（不进仓库），格式见 [`app/js/web.js`](app/js/web.js) 开头。
@@ -111,7 +117,12 @@ Elephants Dream, Tears of Steel, Spring, Sprite Fright, Charge, Coffee Run and C
 Blender Studio, CC BY 2.5–4.0; per-film credits are in `test/readme-shots.mjs`.)
 
 - QR sign-in with [mtcute](https://github.com/mtcute/mtcute), running in a worker.
-- A hand-written MP4 parser feeding MSE: a 2.6 GB film starts in 5.8 s, seeks to unbuffered positions in 0.6 s.
+- Hand-written MP4 and MKV parsers feeding MSE: a 2.6 GB film starts in 5.8 s, seeks to unbuffered positions in 0.6 s.
+  Videos sent as files (MKV, uncompressed MP4) show up too. MKV: H.264 / HEVC / VP9 / AV1 with AAC / AC-3 / E-AC-3 /
+  Opus / FLAC (the TV cannot decode DTS or TrueHD).
+- Hold OK while playing for a menu: switch audio tracks, turn on subtitles (embedded mov_text, SRT / ASS / PGS in MKV,
+  or an `.srt` / `.ass` file posted in the same group — GBK and Big5 are detected), shift subtitle timing.
+- Series play the next episode automatically; search across all your groups and channels from the top of the source list.
 - Covers: a frame from the middle when the thumbnail is black, Wikipedia posters for films.
 - Web links: `.m3u8` / `.mp4` links posted in a group play directly. Other sites need a site rule, which you write
   yourself in `app/js/sites.local.js` (not in the repository); the format is at the top of `app/js/web.js`.

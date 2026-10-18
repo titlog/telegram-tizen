@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { execFileSync } from 'node:child_process';
 
 const ROOT = new URL('..', import.meta.url).pathname;
-const ctx = {};
+const ctx = { TextDecoder };       // 轨道名（hdlr / udta 里的 UTF-8）
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(ROOT + 'app/js/mp4.js', 'utf8') + '\nthis.Mp4 = Mp4;', ctx);
 const Mp4 = ctx.Mp4;
@@ -30,9 +30,17 @@ for (const file of process.argv.slice(2)) {
   console.log(`  parseMoov ${(performance.now() - t).toFixed(0)}ms，moov ${(moov.size / 1048576).toFixed(2)}MB，时长 ${movie.duration.toFixed(2)}s`);
 
   for (const tr of movie.tracks) {
-    const sel = tr.kind === 'video' ? 'v:0' : 'a:0';
+    /* 字幕轨（tx3g）：只对样本数，拼段、解码那套不适用（test/check-subs.mjs 管内容） */
+    if (tr.kind === 'sub') {
+      /* 比容器里记的样本数（nb_frames）：ffprobe 的 packet 会略过空样本（tx3g 用空样本表示「这段没字」） */
+      const n = +probe(['-select_streams', 's:' + tr.index, '-show_entries', 'stream=nb_frames', '-of', 'csv=p=0', file]).trim();
+      console.log(`  sub id=${tr.id} ${tr.codec} lang=${tr.lang} n=${tr.n}（ffprobe ${n}）`);
+      if (n !== tr.n) fail(`字幕样本数 ${tr.n} ≠ ffprobe ${n}`);
+      continue;
+    }
+    const sel = (tr.kind === 'video' ? 'v:' : 'a:') + tr.index;      // 多音轨：第几条
     const ref = packets(file, sel);
-    console.log(`  ${tr.kind} id=${tr.id} ${tr.codec} n=${tr.n} keys=${tr.keys ? tr.keys.length : '全部'} shift=${tr.shift} ts=${tr.timescale} ` +
+    console.log(`  ${tr.kind} id=${tr.id} ${tr.codec}${tr.lang ? ' lang=' + tr.lang : ''}${tr.name ? ' name=' + tr.name : ''}${tr.kind === 'audio' ? ' enabled=' + tr.enabled : ''} n=${tr.n} keys=${tr.keys ? tr.keys.length : '全部'} shift=${tr.shift} ts=${tr.timescale} ` +
       (tr.kind === 'video' ? `${tr.width}x${tr.height}` : `${tr.channels}ch ${tr.rate}Hz`) + ` dur=${tr.duration.toFixed(2)}s`);
     if (ref.length !== tr.n) fail(`样本数 ${tr.n} ≠ ffprobe ${ref.length}`);
     const refKeys = ref.filter(p => p.key).length;
@@ -52,7 +60,7 @@ for (const file of process.argv.slice(2)) {
       a = e;
     }
     const ms = performance.now() - t;
-    const out = `/tmp/tgcheck_${tr.kind}.mp4`;
+    const out = `/tmp/tgcheck_${tr.kind}${tr.index}.mp4`;
     fs.writeFileSync(out, Buffer.concat(parts.map(p => Buffer.from(p.buffer, p.byteOffset, p.length))));
     console.log(`    拼 ${seq - 1} 段 ${ms.toFixed(0)}ms`);
 

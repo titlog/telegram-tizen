@@ -3,15 +3,25 @@
  * 数据源只要会一件事：stream(offset, signal, throttle) → {start, iter}，从 start（≤ offset，按 512KB 对齐）起
  * 按顺序吐 Uint8Array。Telegram（tg.js）和 HTTP Range（桌面测试台）各一个实现。
  *
- * 流程：从头读 → 找到 moov（在尾部就跳过去读）→ Mp4.parseMoov → 按样本在文件里的位置顺序读，读到哪条轨的样本
+ * MP4：从头读 → 找到 moov（在尾部就跳过去读）→ Mp4.parseMoov → 按样本在文件里的位置顺序读，读到哪条轨的样本
  * 就拼成 ~1 秒的 moof+mdat 塞进它的 SourceBuffer。跳转 = 换个偏移重新读（目标已经在缓冲里就只改 currentTime）。
+ * MKV（mkv.js，开头 4 个字节认出来）：没有样本表，Mkv.readHead 读头和 Cues，之后按 Cluster 顺序拆块，拆出来的帧
+ * 攒够 ~1 秒拼一段（Mp4.fragmentFrames）。跳转靠 Cues。一路读（MKV 里同一时刻的音视频本来就挨着放）。
  *
  * 「路」（lane）：一路 = 一个从某个偏移顺序往下读的下载 + 它自己的字节窗口。普通文件一路（音视频一起读）。
- * 音视频在文件里隔得远的文件（《黑鹰坠落》4K：10 分钟处视频在 381MB、音频在 51MB，越往后隔得越远）拆成两路，
+ * 音视频在文件里隔得远的 MP4（《黑鹰坠落》4K：10 分钟处视频在 381MB、音频在 51MB，越往后隔得越远）拆成两路，
  * 各读各的位置 —— 一路的话从 6:35 续播要先读过 176MB、60 秒才出画面（2026-10-01 电视实测），播放中音频也越跑越前。
  *
+ * 多音轨：打开时选一条（opts.audio 给的 → 文件标的默认那条 → 第一条放得了的），换音轨 = 在当前位置重开（app.js），
+ * 不在原来的 MediaSource 上换 —— 换编码要 SourceBuffer.changeType，三星电视的 MSE 是自己的实现，没验证过，重开最稳。
+ * 片子里带的字幕不进 SourceBuffer：MP4 的字幕样本在读音视频时顺带从窗口里拿出来，MKV 的字幕块 demuxer 交出来，
+ * 都交给 opts.onSub（app.js → subs.js）。
+ *
  *   var p = Player.create(videoEl, report, onState)
- *   p.open(source, {startAt})   → Promise（出画面时 resolve）
+ *   p.open(source, {startAt, exact, moov, onMoov, audio, onTracks, onSub})   → Promise（出画面时 resolve）
+ *       exact：停在 startAt 本身（换音轨重开用；默认落在它之前的关键帧上）
+ *       onSub(key, pts, dur, data, extra)：片子里的一个字幕样本（秒；extra.zlib = MKV 的压缩块）
+ *   p.tracks()                  {fmt, audio: [{key, lang, name, codec, channels, ok, why, current}], subs: [{key, lang, name, codec, codecPrivate, isDefault, isForced}]}
  *   p.seek(sec, dir)            dir = +1 / -1：快进快退（落在那个方向的关键帧上）；0：落在 sec 之前的关键帧
  *   p.toggle() / p.close() / p.time() / p.duration()
  */
@@ -24,6 +34,7 @@ var Player = (function () {
     var SEG = 1;               // 每段多少秒
     var WIN_WARN = 48 * 1048576;
     var SPLIT = 16 * 1048576;  // 同一时刻的音视频在文件里隔得比这远，就分两路读
+    var VID = 1, AID = 2;      // init 段和分段里写的轨道编号（不用文件里的）：哪条音轨都写成 2
 
     function mb(n) { return (n / 1048576).toFixed(1) + "MB"; }
     function sleep(t) { return new Promise(function (r) { setTimeout(r, t); }); }
@@ -57,6 +68,32 @@ var Player = (function () {
             cs.shift();
         }
     };
+
+    /* 一次性读 [off, off+len)（MKV 的头和 Cues、MP4 里挤在一起的字幕样本）。throttle 卡住只发需要的那几块请求（同 cover.js）。 */
+    async function readRange(source, off, len) {
+        var size = Math.min(len, source.size - off);
+        if (size <= 0) { return new Uint8Array(0); }
+        var ac = new AbortController(), n = 0, need = 0;
+        var st = source.stream(off, ac.signal, function () { return n++ < need ? Promise.resolve() : new Promise(function () {}); });
+        need = Math.ceil((off + size - st.start) / CH);
+        var out = new Uint8Array(size), pos = st.start;
+        try {
+            for await (var c of st.iter) {
+                var s = Math.max(off, pos), e = Math.min(off + size, pos + c.length);
+                if (e > s) { out.set(c.subarray(s - pos, e - pos), s - off); }
+                pos += c.length;
+                if (pos >= off + size) { break; }
+            }
+        } finally { ac.abort(); }
+        if (pos < off + size) { throw new Error("没读够（" + pos + "/" + (off + size) + "）"); }
+        return out;
+    }
+
+    /* 选音轨：要的那条（换音轨时 app 给的）→ 文件标的默认那条 → 第一条放得了的 */
+    function pickAudio(list, want) {
+        var ok = list.filter(function (a) { return a.ok; });
+        return ok.filter(function (a) { return a.key === want; })[0] || ok.filter(function (a) { return a.isDefault; })[0] || ok[0] || null;
+    }
 
     function create(video, report, onState) {
         var R = function (s) { report && report(s); };
@@ -137,7 +174,12 @@ var Player = (function () {
 
         /* 生产到哪了：取最慢的那条轨（默认看全部轨，给了 lane 就只看这一路的） */
         function frontier(lane) {
-            var f = S.movie.duration;
+            var f = S.duration;
+            if (S.fmt === "mkv") {
+                if (S.dmxDone) { return f; }
+                S.tracks.forEach(function (T) { f = Math.min(f, T.front); });
+                return f;
+            }
             (lane ? lane.tracks : S.tracks).forEach(function (T) { if (T.next < T.tr.n) { f = Math.min(f, Mp4.pts(T.tr, T.next)); } });
             return f;
         }
@@ -145,7 +187,7 @@ var Player = (function () {
         var prodMax = 0, prodSum = 0;
         function produce(lane) {
             var t0 = performance.now();
-            produceInner(lane);
+            if (S.fmt === "mkv") { produceMkv(S, lane); } else { produceInner(lane); }
             var d = performance.now() - t0;
             prodSum += d;
             if (d > prodMax) { prodMax = d; }
@@ -169,14 +211,14 @@ var Player = (function () {
                     }
                     while (e < tr.n && win.has(tr.offset[e], tr.size[e]) && tr.dts[e] - tr.dts[a] < span) { list.push(e); e++; }
                     if (!list.length) { break; }
-                    var frag = Mp4.fragment(tr, list, T.seq++, function (d, o, off, n) { win.copy(d, o, off, n); });
+                    var frag = Mp4.fragment(tr, list, T.seq++, function (d, o, off, n) { win.copy(d, o, off, n); }, T.id);
                     T.q.push({ buf: frag, t: Mp4.pts(tr, list[0]) });
                     T.qBytes += frag.length;
                     T.next = e;
                     pumpSb(T);
                 }
             });
-            var need = Infinity;
+            var need = Math.min(Infinity, subsFromWin(S, win));
             lane.tracks.forEach(function (T) { if (T.next < T.tr.n) { need = Math.min(need, T.tr.offset[T.next]); } });
             win.release(need === Infinity ? win.endOff : need);
             if (win.total > WIN_WARN && !S.warnedWin) {
@@ -184,6 +226,29 @@ var Player = (function () {
                 R("窗口里攒了 " + mb(win.total) + "（" + lane.name + "）：音视频在文件里隔得很远（交错差）");
             }
             if (S.tracks.every(function (T) { return T.next >= T.tr.n; })) { finish(); }
+        }
+
+        /* MP4 的字幕样本：窗口里有哪个就拿哪个（按文件位置排好的下标二分）。不参与「窗口留到哪」—— 字幕样本可能根本不在
+         * 音视频读过的地方（有的工具把整条字幕轨写在文件头或文件尾），留着它会把整个窗口攒住。只有一个样本读了一半时，
+         * 返回它的位置让窗口留到那里。 */
+        function subsFromWin(sess, win) {
+            var hold = Infinity;
+            (sess.subT || []).forEach(function (st) {
+                var tr = st.tr, ord = st.order, lo = 0, hi = ord.length;
+                while (lo < hi) { var mid = (lo + hi) >> 1; if (tr.offset[ord[mid]] < win.startOff) { lo = mid + 1; } else { hi = mid; } }
+                for (var j = lo; j < ord.length && tr.offset[ord[j]] < win.endOff; j++) {
+                    var i = ord[j];
+                    if (st.got[i]) { continue; }
+                    if (!win.has(tr.offset[i], tr.size[i])) { hold = Math.min(hold, tr.offset[i]); break; }
+                    st.got[i] = 1;
+                    emitSub(sess, st, i, win.read(tr.offset[i], tr.size[i]));
+                }
+            });
+            return hold;
+        }
+        function emitSub(sess, st, i, data) {
+            var tr = st.tr, d = i + 1 < tr.n ? tr.dts[i + 1] - tr.dts[i] : tr.lastDelta;
+            if (sess.opts.onSub) { try { sess.opts.onSub(st.key, tr.dts[i] / tr.timescale, d / tr.timescale, data, {}); } catch (e) {} }
         }
 
         function finish() {
@@ -197,6 +262,64 @@ var Player = (function () {
                 R("整部片取完了");
             };
             wait();
+        }
+
+        /* ---------- MKV：拆块 → 攒够一秒拼一段 ---------- */
+
+        function produceMkv(sess, lane) {
+            var out = sess.dmx.feed(lane.win);
+            takeMkv(sess, out);
+            lane.win.release(sess.dmx.pos);
+            if (sess.dmx.done) { endMkv(sess, lane); }
+        }
+        /* 读到文件尾（或者 Segment 完了）：把 demuxer 压着的最后几帧要出来，剩下的不够一秒也拼 */
+        function endMkv(sess, lane) {
+            if (sess.dmxDone || S !== sess) { return; }
+            takeMkv(sess, sess.dmx.flush());
+            sess.dmxDone = true;
+            stopLane(lane);             // 后面只剩 Cues / Tags
+            finish();
+        }
+        function takeMkv(sess, out) {
+            var V = sess.tracks[0], A = sess.tracks[1];
+            if (out.audioStsd && A && !A.inited) {
+                /* AC-3 / E-AC-3：dac3 / dec3 要第一帧的同步帧头才写得出，init 段这时才 append */
+                A.tr.stsd = out.audioStsd;
+                A.q.push({ buf: Mp4.initSegment(A.tr, AID), init: true });
+                A.inited = true;
+            }
+            if (out.video && out.video.length) {
+                if (sess.needStart) {
+                    /* 没有 Cues、按码率猜的位置：真的从哪开始，要等第一个关键帧拆出来才知道 */
+                    var f0 = out.video[0], t0 = (f0.dts + (f0.cto || 0)) / V.tr.timescale;
+                    sess.needStart = false;
+                    if (sess.seekAt) { sess.seekAt.to = t0; }
+                    sess.startTo = t0;
+                    if (sess.cleared) { video.currentTime = t0; }      // 旧缓冲还没清完的话，清完那一下会挪过去
+                }
+                Array.prototype.push.apply(V.pend, out.video);
+                cutFrames(V);
+            }
+            if (A && out.audio && out.audio.length) { Array.prototype.push.apply(A.pend, out.audio); }
+            if (A && A.inited) { cutFrames(A); }
+            if (out.subs && out.subs.length && sess.opts.onSub) {
+                out.subs.forEach(function (s) { try { sess.opts.onSub("s:" + s.num, s.pts, s.dur, s.data, { zlib: !!s.zlib }); } catch (e) {} });
+            }
+        }
+        /* 和 MP4 那条路一样：窗口里拆出多少就拼多少（每段最多 1 秒），不等凑满一秒 —— 等的话跳转后第一段要多下一秒的字节，
+         * 桌面测试里跳转 1.4–2.0 秒 → 见 CLAUDE.md */
+        function cutFrames(T) {
+            var ts = T.tr.timescale, span = SEG * ts;
+            while (T.pend.length) {
+                var e = 0, acc = 0;
+                while (e < T.pend.length && acc < span) { acc += T.pend[e].dur; e++; }
+                var list = T.pend.splice(0, e), f = list[0], l = list[list.length - 1];
+                var frag = Mp4.fragmentFrames(T.id, list, T.seq++);
+                T.q.push({ buf: frag, t: (f.dts + (f.cto || 0)) / ts });
+                T.qBytes += frag.length;
+                T.front = (l.dts + l.dur) / ts;
+                pumpSb(T);
+            }
         }
 
         /* ---------- 下载 ---------- */
@@ -215,8 +338,9 @@ var Player = (function () {
         function newLane(name, tracks) { return { name: name, tracks: tracks, win: new Win(), gen: 0, ac: null }; }
         function stopLane(lane) { lane.gen++; if (lane.ac) { lane.ac.abort(); } }
 
-        /* 这一路从 offset 开始读。onChunk 返回 false 就停（跳去别处）。出错自动重试。 */
-        function startStream(lane, offset, onChunk) {
+        /* 这一路从 offset 开始读。onChunk 返回 false 就停（跳去别处）；读到文件尾调 lane.onEnd。出错自动重试。
+         * keep：窗口里已有的字节留着（从窗口末尾接着读） */
+        function startStream(lane, offset, onChunk, keep) {
             var sess = S, g = ++lane.gen;
             if (lane.ac) { lane.ac.abort(); }
             var ac = lane.ac = new AbortController();
@@ -225,7 +349,7 @@ var Player = (function () {
                 while (S === sess && lane.gen === g) {
                     var st = sess.source.stream(offset, ac.signal, function () { return gate(sess, lane, g); });
                     /* 重试时从窗口末尾接着读，窗口里还没用掉的字节留着（对得上才留：起点按 512KB 对齐） */
-                    if (!tries || st.start !== lane.win.endOff) { lane.win.reset(st.start); }
+                    if ((!tries && !keep) || st.start !== lane.win.endOff) { lane.win.reset(st.start); }
                     var t0 = performance.now(), first = true;
                     try {
                         for await (var c of st.iter) {
@@ -236,6 +360,7 @@ var Player = (function () {
                             lane.win.add(c);
                             if (onChunk() === false) { return; }
                         }
+                        if (S === sess && lane.gen === g && lane.onEnd) { lane.onEnd(); }
                         return;
                     } catch (e) {
                         if (ac.signal.aborted || S !== sess || lane.gen !== g) { return; }
@@ -256,6 +381,12 @@ var Player = (function () {
                 var pos = 0;
                 function step() {
                     var win = main.win;
+                    /* 开头是 EBML 魔数：MKV / WebM，交给 mkv.js（这一块已经在窗口里了，Mkv.readHead 先从这读） */
+                    if (pos === 0 && win.has(0, 4) && typeof Mkv !== "undefined" && Mkv.sniff(win.read(0, 4))) {
+                        main.onChunk = function () { return false; };
+                        resolve({ mkvSniffed: true });
+                        return false;
+                    }
                     while (true) {
                         if (!win.has(pos, 8)) { return true; }
                         var hb = win.read(pos, Math.min(16, win.endOff - pos));
@@ -278,6 +409,11 @@ var Player = (function () {
                             return false;
                         }
                         if (h.type === "moof") { reject(new Error("已经是分段 MP4（fragmented），还不支持")); return false; }
+                        /* 开头就不像盒子（AVI 的 RIFF、TS 的 0x47…）：别顺着乱七八糟的「大小」一路跳到文件尾 */
+                        if (pos === 0 && (h.size < 8 || h.size > sess.source.size || !/^[\x20-\x7e]{4}$/.test(h.type))) {
+                            reject(new Error("不认识的文件格式（不是 MP4 也不是 MKV）"));
+                            return false;
+                        }
                         pos = h.start + h.size;
                         if (pos >= sess.source.size) { reject(new Error("读到文件尾也没找到 moov")); return false; }
                     }
@@ -287,29 +423,49 @@ var Player = (function () {
             });
         }
 
+        /* MKV 的头：先从主路已经读到的那块里取，取不到再单独读 */
+        function headReader(sess) {
+            return function (off, len) {
+                var w = sess.lanes[0].win, n = Math.max(0, Math.min(len, sess.source.size - off));
+                if (w.has(off, n)) { return Promise.resolve(w.read(off, n)); }
+                return readRange(sess.source, off, len);
+            };
+        }
+
         /* ---------- 打开 ---------- */
 
         api.open = function (source, opts) {
             opts = opts || {};
             api.close();
             var sess = S = {
-                source: source, lanes: [newLane("主", [])], repos: 0, tracks: [], bytes: 0, t0: performance.now(),
-                ms: new MediaSource(), lastByteAt: performance.now()
+                source: source, opts: opts, lanes: [newLane("主", [])], repos: 0, tracks: [], bytes: 0, t0: performance.now(),
+                ms: new MediaSource(), lastByteAt: performance.now(), duration: 0
             };
             state("loading");
             return new Promise(function (resolve, reject) {
                 sess.ms.addEventListener("sourceopen", function () {
-                    /* 缓存里有这部片的 moov（opts.moov = {start, bytes}）就不用再下 —— 长片的 moov 有好几 MB，
+                    /* 缓存里有这部片的 moov（opts.moov = {start, bytes}）/ MKV 的头（{mkv}）就不用再下 —— 长片的 moov 有好几 MB，
                      * 电视上要 2.5–4 秒（2026-10-01 实测）。新取到的交给 opts.onMoov 存起来。 */
-                    var got = opts.moov ? Promise.resolve({ start: opts.moov.start, bytes: opts.moov.bytes, atHead: false, cached: true }) : findMoov(sess);
-                    got.then(function (m) {
+                    var cm = opts.moov, got = cm && cm.mkv ? Promise.resolve({ mkv: cm.mkv, cached: true }) :
+                        cm ? Promise.resolve({ start: cm.start, bytes: cm.bytes, atHead: false, cached: true }) : findMoov(sess);
+                    got.then(async function (m) {
                         if (S !== sess) { return; }
                         var tm = performance.now();
-                        sess.movie = Mp4.parseMoov(m.bytes);
-                        var parseMs = Math.round(performance.now() - tm);
-                        sess.moovMs = Math.round(tm - sess.t0);
-                        if (!m.cached && opts.onMoov) { try { opts.onMoov({ start: m.start, bytes: m.bytes }); } catch (e) {} }
-                        setup(sess, m, parseMs, opts.startAt || 0);
+                        if (m.mkv || m.mkvSniffed) {
+                            var info = m.mkv || await Mkv.readHead(headReader(sess), source.size);
+                            if (S !== sess) { return; }
+                            stopLane(sess.lanes[0]);
+                            sess.moovMs = Math.round(performance.now() - sess.t0);
+                            if (!m.cached && opts.onMoov) { try { opts.onMoov({ mkv: info }); } catch (e) {} }
+                            setupMkv(sess, info, Math.round(performance.now() - tm), !!m.cached, opts);
+                        } else {
+                            sess.movie = Mp4.parseMoov(m.bytes);
+                            var parseMs = Math.round(performance.now() - tm);
+                            sess.moovMs = Math.round(tm - sess.t0);
+                            if (!m.cached && opts.onMoov) { try { opts.onMoov({ start: m.start, bytes: m.bytes }); } catch (e) {} }
+                            setup(sess, m, parseMs, opts);
+                        }
+                        if (opts.onTracks) { try { opts.onTracks(api.tracks()); } catch (e) {} }
                         watchFirstFrame(sess, resolve, reject);
                     }).catch(function (e) {
                         if (S !== sess) { return; }
@@ -324,34 +480,57 @@ var Player = (function () {
             });
         };
 
-        function setup(sess, m, parseMs, startAt) {
-            var mv = sess.movie, v = null, a = null, notes = [];
+        /* 一条要进 SourceBuffer 的轨 */
+        function addTrack(sess, tr, id) {
+            var T = { tr: tr, id: id, sb: sess.ms.addSourceBuffer(tr.mime), q: [], qBytes: 0, ahead: 90, next: 0, seq: 1, pend: [], front: 0, inited: true };
+            T.sb.addEventListener("updateend", function () {
+                var r = T.removing;
+                T.removing = null;
+                if (r && r.done) { r.done(); }
+                pumpSb(T);
+            });
+            T.sb.addEventListener("error", function () { R("SourceBuffer error " + tr.mime); });
+            sess.tracks.push(T);
+            return T;
+        }
+
+        function setup(sess, m, parseMs, opts) {
+            var mv = sess.movie, v = null, notes = [], startAt = opts.startAt || 0;
+            sess.fmt = "mp4";
+            sess.duration = mv.duration;
             mv.tracks.forEach(function (tr) {
                 var ok = !tr.unsupported && MediaSource.isTypeSupported(tr.mime);
                 if (tr.kind === "video" && !v) { if (ok) { v = tr; } else { notes.push("视频 " + (tr.unsupported || tr.codec) + " 放不了"); } }
-                if (tr.kind === "audio" && !a) { if (ok) { a = tr; } else { notes.push("音频 " + (tr.unsupported || tr.codec) + " 放不了，没声音"); } }
             });
             if (!v) { throw new Error(notes.join("；") || "没有视频轨"); }
-            [v, a].forEach(function (tr) {
-                if (!tr) { return; }
-                var T = { tr: tr, sb: sess.ms.addSourceBuffer(tr.mime), q: [], qBytes: 0, ahead: 90, next: 0, seq: 1 };
-                T.sb.addEventListener("updateend", function () {
-                    var r = T.removing;
-                    T.removing = null;
-                    if (r && r.done) { r.done(); }
-                    pumpSb(T);
-                });
-                T.sb.addEventListener("error", function () { R("SourceBuffer error " + tr.mime); });
-                sess.tracks.push(T);
+            /* 音轨：tkhd 里 enabled 的那条是默认（多音轨的 MP4 只开一条） */
+            sess.audios = mv.tracks.filter(function (tr) { return tr.kind === "audio"; }).map(function (tr) {
+                var ok = !tr.unsupported && MediaSource.isTypeSupported(tr.mime);
+                return { key: "a:" + tr.id, tr: tr, lang: tr.lang, name: tr.name, codec: tr.codec, channels: tr.channels, ok: ok,
+                         why: ok ? "" : (tr.unsupported || tr.codec + " 电视放不了"), isDefault: tr.enabled };
+            });
+            var pick = pickAudio(sess.audios, opts.audio), a = pick ? pick.tr : null;
+            sess.audioKey = pick ? pick.key : "";
+            if (!a && sess.audios.length) { notes.push("音频 " + sess.audios.map(function (x) { return x.why; }).join("、") + "，没声音"); }
+            addTrack(sess, v, VID);
+            if (a) { addTrack(sess, a, AID); }
+            /* 片子里的字幕轨（tx3g / wvtt） */
+            sess.subT = mv.tracks.filter(function (tr) { return tr.kind === "sub" && !tr.unsupported && tr.n; }).map(function (tr) {
+                var order = new Uint32Array(tr.n);
+                for (var i = 0; i < tr.n; i++) { order[i] = i; }
+                order.sort(function (x, y) { return tr.offset[x] - tr.offset[y]; });
+                return { key: "s:" + tr.id, tr: tr, got: new Uint8Array(tr.n), order: order };
             });
             sess.ms.duration = mv.duration;
-            sess.tracks.forEach(function (T) { T.q.push({ buf: Mp4.initSegment(T.tr), init: true }); pumpSb(T); });
-            sess.moovDone = true;
+            sess.tracks.forEach(function (T) { T.q.push({ buf: Mp4.initSegment(T.tr, T.id), init: true }); pumpSb(T); });
+            sess.moovDone = sess.ready = true;
             R("moov " + mb(m.bytes.length) + (m.cached ? "（缓存）" : m.atHead ? "（开头）" : "（文件尾）") + " " + sess.moovMs + "ms 到手，解析 " + parseMs + "ms：" +
               v.codec + " " + v.width + "x" + v.height + " " + v.n + " 帧 " + (v.keys ? v.keys.length : v.n) + " 关键帧 / " +
-              (a ? a.codec + " " + a.channels + "ch " + a.rate + "Hz" : "无音频") + "，" + Math.round(mv.duration / 60) + " 分" +
-              (notes.length ? " | " + notes.join("；") : ""));
+              (a ? a.codec + " " + a.channels + "ch " + a.rate + "Hz" : "无音频") + (sess.audios.length > 1 ? "（" + sess.audios.length + " 条音轨，用 " + sess.audioKey + "）" : "") +
+              (sess.subT.length ? "，字幕轨 " + sess.subT.map(function (s) { return s.tr.codec + (s.tr.lang ? "/" + s.tr.lang : ""); }).join(" ") : "") +
+              "，" + Math.round(mv.duration / 60) + " 分" + (notes.length ? " | " + notes.join("；") : ""));
             if (notes.length) { state("note", notes.join("；")); }
+            subsUpfront(sess);
             if (a) {
                 /* 同一时刻的音视频在文件里各在哪：隔得远的文件，跳转要读很多用不上的字节 */
                 R("布局：" + [0, 60, 600, mv.duration / 2].filter(function (t) { return t < mv.duration; }).map(function (t) {
@@ -376,7 +555,7 @@ var Player = (function () {
                 main.tracks = sess.tracks.slice();
             }
             if (startAt > 1) {
-                reposition(Mp4.keyAtOrBefore(v, Mp4.sampleAt(v, startAt)), "续播");
+                reposition(Mp4.keyAtOrBefore(v, Mp4.sampleAt(v, startAt)), "续播", opts.exact ? startAt : 0);
             } else if (m.atHead && !split) {
                 /* moov 在开头：同一条读取流接着往下读就是 mdat，不用重开 */
                 main.onChunk = function () { produce(main); };
@@ -384,6 +563,23 @@ var Player = (function () {
             } else {
                 reposition(0, "从头");
             }
+        }
+
+        /* 整条字幕轨在文件里挤在一小段里（不跟音视频交错 —— 有的工具这么写）：开头单独读一次，全拿出来 */
+        function subsUpfront(sess) {
+            sess.subT.forEach(function (st) {
+                var tr = st.tr, a = tr.offset[st.order[0]], l = st.order[tr.n - 1], e = tr.offset[l] + tr.size[l];
+                if (e - a > 4 * 1048576) { return; }
+                readRange(sess.source, a, e - a).then(function (b) {
+                    if (S !== sess) { return; }
+                    for (var i = 0; i < tr.n; i++) {
+                        if (st.got[i]) { continue; }
+                        st.got[i] = 1;
+                        emitSub(sess, st, i, b.subarray(tr.offset[i] - a, tr.offset[i] - a + tr.size[i]));
+                    }
+                    R("字幕轨 " + st.key + " 在文件里挤在一起（" + mb(e - a) + "），一次读完 " + tr.n + " 条");
+                }).catch(function (e) { R("字幕轨 " + st.key + " 读不出来：" + errStr(e)); });
+            });
         }
 
         /* chunk 平均多长（秒）：样本在文件里连续的一段算一个 chunk */
@@ -394,17 +590,19 @@ var Player = (function () {
             return n ? (span / n).toFixed(2) + "s" : "整条连续";
         }
 
-        /* 从视频第 k 帧（关键帧）开始重新读；音频从不晚于它的那一帧开始。 */
-        function reposition(k, why) {
-            var sess = S, V = sess.tracks[0], A = sess.tracks[1];
-            var t = Mp4.pts(V.tr, k);
-            V.next = k;
-            V.lead = true;
-            if (A) { A.next = Mp4.sampleAt(A.tr, Math.max(0, t - 0.05)); }
-            /* 先清空旧缓冲、清完再挪播放头。反过来的话，Chrome 会先在旧缓冲里跳：旧缓冲里关键帧后面跟着它的前导帧
-             * （open GOP），参考的上一个 GOP 不在解码器里 → PIPELINE_ERROR_DECODE（桌面 x265 实测）。 */
+        /* 清空两条轨的缓冲，清完再挪播放头（到 t，exact 给了就到 exact）。反过来的话，Chrome 会先在旧缓冲里跳：旧缓冲里关键帧
+         * 后面跟着它的前导帧（open GOP），参考的上一个 GOP 不在解码器里 → PIPELINE_ERROR_DECODE（桌面 x265 实测）。
+         * t < 0：先不挪（MKV 按码率猜的位置，等第一个关键帧拆出来再定）。 */
+        function clearAll(sess, t, why, exact) {
+            var to = exact > t ? exact : t;
             var left = sess.tracks.length, g = ++sess.repos;
-            var removed = function () { if (--left === 0 && S === sess && sess.repos === g) { video.currentTime = Math.max(0, t); } };
+            sess.cleared = false;
+            sess.startTo = t >= 0 ? to : undefined;
+            var removed = function () {
+                if (--left > 0 || S !== sess || sess.repos !== g) { return; }
+                sess.cleared = true;
+                if (sess.startTo !== undefined) { video.currentTime = Math.max(0, sess.startTo); }
+            };
             sess.tracks.forEach(function (T) {
                 T.q = T.q.filter(function (op) { return op.init; });      // 还没进去的 init 段留着
                 T.qBytes = 0;
@@ -412,7 +610,17 @@ var Player = (function () {
                 pumpSb(T);
             });
             sess.done = false;
-            sess.seekAt = { t: performance.now(), to: t, why: why };
+            sess.seekAt = { t: performance.now(), to: Math.max(0, to), why: why };
+        }
+
+        /* 从视频第 k 帧（关键帧）开始重新读；音频从不晚于它的那一帧开始。 */
+        function reposition(k, why, exact) {
+            var sess = S, V = sess.tracks[0], A = sess.tracks[1];
+            var t = Mp4.pts(V.tr, k);
+            V.next = k;
+            V.lead = true;
+            if (A) { A.next = Mp4.sampleAt(A.tr, Math.max(0, t - 0.05)); }
+            clearAll(sess, t, why, exact);
             var where = [];
             sess.lanes.forEach(function (lane) {
                 var off = Math.min.apply(null, lane.tracks.map(function (T) { return T.tr.offset[T.next]; }));
@@ -420,7 +628,75 @@ var Player = (function () {
                 startStream(lane, off, function () { return lane.onChunk(); });
                 where.push(lane.name + "路从 " + mb(off));
             });
-            R(why + " → " + t.toFixed(1) + "s，" + where.join("，") + " 读");
+            R(why + " → " + t.toFixed(1) + "s" + (exact > t ? "（停在 " + exact.toFixed(1) + "s）" : "") + "，" + where.join("，") + " 读");
+        }
+
+        /* ---------- MKV 的打开、跳转 ---------- */
+
+        function setupMkv(sess, info, ms, cached, opts) {
+            var v = null, notes = [], startAt = opts.startAt || 0;
+            sess.fmt = "mkv";
+            sess.info = info;
+            sess.duration = info.duration;
+            info.tracks.forEach(function (t) {
+                if (t.kind !== "video" || v) { return; }
+                if (!t.unsupported && MediaSource.isTypeSupported(t.mime)) { v = t; } else { notes.push("视频 " + (t.unsupported || t.codec || t.codecId) + " 放不了"); }
+            });
+            if (!v) { throw new Error(notes.join("；") || "没有视频轨"); }
+            sess.audios = info.tracks.filter(function (t) { return t.kind === "audio"; }).map(function (t) {
+                var ok = !t.unsupported && !!t.mime && MediaSource.isTypeSupported(t.mime);
+                return { key: "a:" + t.num, mk: t, lang: t.lang, name: t.name, codec: t.codec || t.codecId, channels: t.channels, ok: ok,
+                         why: ok ? "" : (t.unsupported || (t.codec || t.codecId) + " 电视放不了"), isDefault: t.isDefault };
+            });
+            var pick = pickAudio(sess.audios, opts.audio), a = pick ? pick.mk : null;
+            sess.audioKey = pick ? pick.key : "";
+            if (!a && sess.audios.length) { notes.push("音频 " + sess.audios.map(function (x) { return x.why; }).join("、") + "，没声音"); }
+            sess.subsInfo = info.tracks.filter(function (t) { return t.kind === "sub" && !t.unsupported; });
+            function trOf(t) { return { kind: t.kind, timescale: info.timescale, stsd: t.stsd, width: t.width, height: t.height, codec: t.codec, mime: t.mime }; }
+            var V = addTrack(sess, trOf(v), VID), A = a ? addTrack(sess, trOf(a), AID) : null;
+            sess.ms.duration = info.duration;
+            V.q.push({ buf: Mp4.initSegment(V.tr, VID), init: true });
+            pumpSb(V);
+            if (A) {
+                A.inited = !!a.stsd;
+                if (A.inited) { A.q.push({ buf: Mp4.initSegment(A.tr, AID), init: true }); pumpSb(A); }
+            }
+            sess.dmx = Mkv.demuxer(info, { video: v.num, audio: a ? a.num : 0, subs: sess.subsInfo.map(function (t) { return t.num; }) });
+            /* 认出 MKV 时主路已经下了开头一块（readHead 也是从它读的）：从头放的话第一个 Cluster 多半就在里面，留着接着用，省一次请求 */
+            var head = sess.lanes[0].win;
+            sess.lanes[0] = newLane("主", sess.tracks.slice());
+            sess.lanes[0].win = head;
+            sess.moovDone = sess.ready = true;
+            R("MKV 头" + (cached ? "（缓存）" : "") + " " + sess.moovMs + "ms 到手（读头和 Cues " + ms + "ms" + (info.reads ? "，" + info.reads + " 次请求" : "") + "）：" + v.codec + " " + v.width + "x" + v.height + " / " +
+              (a ? a.codec + " " + a.channels + "ch " + a.rate + "Hz" : "无音频") + (sess.audios.length > 1 ? "（" + sess.audios.length + " 条音轨，用 " + sess.audioKey + "）" : "") +
+              (sess.subsInfo.length ? "，字幕轨 " + sess.subsInfo.map(function (t) { return t.codecId + (t.lang ? "/" + t.lang : ""); }).join(" ") : "") +
+              "，" + Math.round(info.duration / 60) + " 分，Cues " + (info.cues ? info.cues.t.length + " 个" : "没有") +
+              (notes.length ? " | " + notes.join("；") : ""));
+            if (notes.length) { state("note", notes.join("；")); }
+            if (startAt > 1) { repositionMkv(sess, cueOrGuess(sess, startAt, 0), "续播", opts.exact ? startAt : 0); }
+            else { repositionMkv(sess, { t: 0, pos: info.firstCluster }, "从头"); }
+        }
+
+        function cueOrGuess(sess, sec, dir) {
+            var info = sess.info, c = dir ? Mkv.cueNear(info, sec, dir, video.currentTime) : Mkv.cueAt(info, sec);
+            return c || { t: sec, pos: Mkv.guessOffset(info, sec, sess.source.size), resync: true };
+        }
+
+        function repositionMkv(sess, c, why, exact) {
+            var lane = sess.lanes[0];
+            sess.dmx.reset(c.pos, c.t, !!c.resync);
+            sess.dmxDone = false;
+            sess.tracks.forEach(function (T) { T.pend = []; T.front = c.t; });
+            sess.needStart = !!c.resync;
+            clearAll(sess, c.resync ? -1 : c.t, why, exact);
+            if (c.resync) { sess.seekAt.to = c.t; }
+            lane.onChunk = function () { produce(lane); };
+            lane.onEnd = function () { endMkv(sess, lane); };
+            var keep = lane.win.startOff <= c.pos && c.pos < lane.win.endOff && lane.win.endOff % CH === 0;
+            if (!keep) { lane.win.reset(c.pos); }
+            startStream(lane, keep ? lane.win.endOff : c.pos, function () { return lane.onChunk(); }, keep);
+            if (keep) { produce(lane); }
+            R(why + " → " + c.t.toFixed(1) + "s" + (exact > c.t ? "（停在 " + exact.toFixed(1) + "s）" : "") + "，从 " + mb(c.pos) + " 读" + (c.resync ? "（没有 Cues，按码率猜的）" : ""));
         }
 
         function watchFirstFrame(sess, resolve, reject) {
@@ -435,7 +711,7 @@ var Player = (function () {
                 if (started && !video.paused && video.currentTime > base + 0.04 && video.currentTime < base + 5) {
                     clearInterval(tick);
                     sess.firstFrameMs = Math.round(performance.now() - sess.t0);
-                    R("到画面 " + sess.firstFrameMs + "ms（第一块 " + sess.firstChunkMs + "ms，moov 到手 " + sess.moovMs + "ms，取了 " + mb(sess.bytes) + "）" +
+                    R("到画面 " + sess.firstFrameMs + "ms（第一块 " + sess.firstChunkMs + "ms，" + (sess.fmt === "mkv" ? "MKV 头" : "moov") + " 到手 " + sess.moovMs + "ms，取了 " + mb(sess.bytes) + "）" +
                       video.videoWidth + "x" + video.videoHeight);
                     sess.seekAt = null;
                     state("playing");
@@ -455,15 +731,29 @@ var Player = (function () {
 
         api.seek = function (sec, dir) {
             var sess = S;
-            if (!sess || !sess.movie) { return; }
+            if (!sess || !sess.ready) { return; }
+            sec = Math.max(0, Math.min(sec, sess.duration - 3));
+            var b = video.buffered, fr = frontier(), i;
+            if (sess.fmt === "mkv") {
+                var c = cueOrGuess(sess, sec, dir);
+                /* 缓冲内跳转只在没见过 open GOP 的片子上做（理由同下） */
+                for (i = 0; i < b.length && !c.resync && !sess.dmx.openGop; i++) {
+                    if (b.start(i) <= c.t + 0.05 && b.end(i) > c.t + 0.5 && b.end(i) >= fr - 2) {
+                        sess.seekAt = { t: performance.now(), to: c.t, why: "缓冲内跳转" };
+                        video.currentTime = Math.max(c.t, b.start(i));
+                        R("缓冲内跳转 → " + c.t.toFixed(1) + "s");
+                        return;
+                    }
+                }
+                repositionMkv(sess, c, dir > 0 ? "快进" : dir < 0 ? "快退" : "跳转");
+                return;
+            }
             var V = sess.tracks[0], tr = V.tr;
-            sec = Math.max(0, Math.min(sec, sess.movie.duration - 3));
             var k = dir ? Mp4.keyNear(tr, sec, dir, video.currentTime) : Mp4.keyAtOrBefore(tr, Mp4.sampleAt(tr, sec));
             var t = Mp4.pts(tr, k);
             /* 目标在正在生产的那段缓冲里：只改播放头。关键帧带前导帧（open GOP）时不行 —— 缓冲里前导帧都在，
              * 从这个关键帧开始解它们就是错的，只能重新取、在 produce 里把前导帧丢掉。 */
-            var b = video.buffered, fr = frontier();
-            for (var i = 0; i < b.length && Mp4.afterLeading(tr, k) === k + 1; i++) {
+            for (i = 0; i < b.length && Mp4.afterLeading(tr, k) === k + 1; i++) {
                 if (b.start(i) <= t + 0.05 && b.end(i) > t + 0.5 && b.end(i) >= fr - 2) {
                     sess.seekAt = { t: performance.now(), to: t, why: "缓冲内跳转" };
                     video.currentTime = Math.max(t, b.start(i));
@@ -473,6 +763,20 @@ var Player = (function () {
             }
             reposition(k, dir > 0 ? "快进" : dir < 0 ? "快退" : "跳转");
         };
+
+        /* 从当前位置重读（停在原处）：中途换到一条图形字幕时，前面预读过的那一分钟里它的块已经扔了（app.js 只存正在显示的那条） */
+        api.refetch = function (why) {
+            var sess = S, t = video.currentTime;
+            if (!sess || !sess.ready) { return; }
+            if (sess.fmt === "mkv") { repositionMkv(sess, cueOrGuess(sess, t, 0), why || "重读", t); return; }
+            reposition(Mp4.keyAtOrBefore(sess.tracks[0].tr, Mp4.sampleAt(sess.tracks[0].tr, t)), why || "重读", t);
+        };
+
+        /* 从 t 之前的关键帧重开（卡住时） */
+        function restartAt(sess, t, why) {
+            if (sess.fmt === "mkv") { repositionMkv(sess, cueOrGuess(sess, t, 0), why); return; }
+            reposition(Mp4.keyAtOrBefore(sess.tracks[0].tr, Mp4.sampleAt(sess.tracks[0].tr, t)), why);
+        }
 
         /* ---------- 监视：卡顿、出画面、空档、回收 ---------- */
 
@@ -507,7 +811,7 @@ var Player = (function () {
                         if (now - stuckAt > 20000 && now - sess.lastByteAt > 20000) {
                             R("卡了 20 秒、字节也停了，从 " + t.toFixed(1) + "s 重开");
                             stuckAt = now;
-                            reposition(Mp4.keyAtOrBefore(sess.tracks[0].tr, Mp4.sampleAt(sess.tracks[0].tr, t)), "重开");
+                            restartAt(sess, t, "重开");
                         }
                     } else if (stuckAt) {
                         var d = now - stuckAt;
@@ -520,7 +824,7 @@ var Player = (function () {
                 if (now - lastEvict > 5000) { lastEvict = now; evict(BEHIND); }
                 if (now - lastLine > 30000) {
                     var dt = (now - lastLine) / 1000;
-                    R("状态 t=" + t.toFixed(0) + "/" + sess.movie.duration.toFixed(0) + " 前方 " + (frontier() - t).toFixed(0) + "s 下载 " +
+                    R("状态 t=" + t.toFixed(0) + "/" + sess.duration.toFixed(0) + " 前方 " + (frontier() - t).toFixed(0) + "s 下载 " +
                       ((sess.bytes - lastBytes) / 1048576 / dt).toFixed(2) + "MB/s 窗口 " + mb(sess.lanes.reduce(function (n, l) { return n + l.win.total; }, 0)) + "（" + sess.lanes.length + " 路）卡顿 " + stalls);
                     lastLine = now;
                     lastBytes = sess.bytes;
@@ -548,8 +852,24 @@ var Player = (function () {
         api.toggle = function () { if (video.paused) { video.play().catch(function () {}); } else { video.pause(); } return !video.paused; };
         api.paused = function () { return video.paused; };
         api.time = function () { return video.currentTime; };
-        api.duration = function () { return S && S.movie ? S.movie.duration : 0; };
-        api.info = function () { return S && S.movie ? S.tracks[0].tr : null; };
+        api.duration = function () { return S && S.ready ? S.duration : 0; };
+        api.info = function () { return S && S.ready ? S.tracks[0].tr : null; };
+        /* 音轨和字幕轨（app 的菜单用） */
+        api.tracks = function () {
+            if (!S || !S.ready) { return { fmt: "", audio: [], subs: [] }; }
+            var sess = S;
+            return {
+                fmt: sess.fmt,
+                audio: (sess.audios || []).map(function (a) {
+                    return { key: a.key, lang: a.lang, name: a.name, codec: a.codec, channels: a.channels, ok: a.ok, why: a.why, current: a.key === sess.audioKey };
+                }),
+                subs: sess.fmt === "mkv" ? sess.subsInfo.map(function (t) {
+                    return { key: "s:" + t.num, lang: t.lang, name: t.name, codec: t.codecId, codecPrivate: t.codecPrivate, isDefault: t.isDefault, isForced: t.isForced };
+                }) : (sess.subT || []).map(function (st) {
+                    return { key: st.key, lang: st.tr.lang, name: st.tr.name, codec: st.tr.codec, codecPrivate: null, isDefault: st.tr.enabled, isForced: false };
+                })
+            };
+        };
         /* 每个 SourceBuffer 的缓冲区间（音视频分开看，video.buffered 是交集） */
         api.debug = function () {
             return S ? S.tracks.map(function (T) {
@@ -561,5 +881,5 @@ var Player = (function () {
         return api;
     }
 
-    return { create: create, CH: CH };
+    return { create: create, CH: CH, readRange: readRange };
 })();

@@ -7,8 +7,9 @@
  * 用法：
  *   var top = Mp4.scanTop(bytes, base)          顶层盒子（ftyp/moov/mdat…），只要盒子头在 bytes 里就列出来
  *   var movie = Mp4.parseMoov(moovBytes)       { timescale, duration(秒), tracks: [...] }
- *   Mp4.initSegment(track)                      这条轨的 init 段（ftyp+moov，stsd 原样拷过来）
- *   Mp4.fragment(track, list, seq, copyBytes)   一串样本拼成 moof+mdat；copyBytes(dst, dstOff, fileOff, size) 往 dst 里拷样本数据
+ *   Mp4.initSegment(track, id)                  这条轨的 init 段（ftyp+moov，stsd 原样拷过来）；id 不给就用 track.id
+ *   Mp4.fragment(track, list, seq, copyBytes, id)  一串样本拼成 moof+mdat；copyBytes(dst, dstOff, fileOff, size) 往 dst 里拷样本数据
+ *   Mp4.fragmentFrames(id, frames, seq)         不靠样本表、直接给帧（mkv.js 拆出来的）：frames = [{dts, cto, dur, key, data}]
  *   Mp4.afterLeading(track, k)                  跳到关键帧 k 时要跳过的前导帧之后的第一帧
  *   Mp4.sampleAt(track, sec) / Mp4.keyAtOrBefore(track, i) / Mp4.keyNear(track, sec, dir) / Mp4.pts(track, i)
  */
@@ -81,21 +82,26 @@ var Mp4 = (function () {
         var c = child(b, { p: entry.p + 78, e: entry.e }, "avcC");
         if (!c) { return t; }
         entry.config = b.slice(c.p, c.e);           // WebCodecs 解单帧要的 description
-        return t + "." + hex2(b[c.p + 1]) + hex2(b[c.p + 2]) + hex2(b[c.p + 3]);
+        return avcString(t, entry.config);
     }
+    /* avcC 的正文（AVCDecoderConfigurationRecord）→ codecs 字符串。mkv.js 也用（MKV 的 CodecPrivate 就是它） */
+    function avcString(t, c) { return t + "." + hex2(c[1]) + hex2(c[2]) + hex2(c[3]); }
 
-    /* ISO/IEC 14496-15 附录 E */
     function hevcCodec(b, entry, t) {
         var c = child(b, { p: entry.p + 78, e: entry.e }, "hvcC");
         if (!c) { return t; }
         entry.config = b.slice(c.p, c.e);
-        var p = c.p, x = b[p + 1];
+        return hevcString(t, entry.config);
+    }
+    /* hvcC 的正文 → codecs 字符串，ISO/IEC 14496-15 附录 E */
+    function hevcString(t, b) {
+        var x = b[1];
         var space = x >> 6, tier = (x >> 5) & 1, prof = x & 31;
-        var compat = u32(b, p + 2), rev = 0;
+        var compat = u32(b, 2), rev = 0;
         for (var i = 0; i < 32; i++) { rev = (rev << 1) | ((compat >>> i) & 1); }
-        var s = t + "." + ["", "A", "B", "C"][space] + prof + "." + (rev >>> 0).toString(16) + "." + (tier ? "H" : "L") + b[p + 12];
+        var s = t + "." + ["", "A", "B", "C"][space] + prof + "." + (rev >>> 0).toString(16) + "." + (tier ? "H" : "L") + b[12];
         var cons = [];
-        for (var k = 0; k < 6; k++) { cons.push(b[p + 6 + k]); }
+        for (var k = 0; k < 6; k++) { cons.push(b[6 + k]); }
         while (cons.length && !cons[cons.length - 1]) { cons.pop(); }
         for (var j = 0; j < cons.length; j++) { s += "." + cons[j].toString(16).toUpperCase(); }
         return s;
@@ -141,8 +147,8 @@ var Mp4 = (function () {
             else { tr.codec = t; tr.unsupported = "视频格式 " + t; }
             tr.config = entry.config || null;
             tr.mime = "video/mp4; codecs=\"" + tr.codec + "\"";
-        } else {
-            var ver = u16(b, entry.p + 8);              // QuickTime 声音条目有 v1 / v2，多 16 / 36 字节
+        } else if (tr.kind === "audio") {
+            var ver = u16(b, entry.p + 8);             // QuickTime 声音条目有 v1 / v2，多 16 / 36 字节
             tr.channels = u16(b, entry.p + 16);
             tr.rate = u32(b, entry.p + 24) >>> 16;
             var c0 = entry.p + 28 + (ver === 1 ? 16 : ver === 2 ? 36 : 0);
@@ -152,6 +158,11 @@ var Mp4 = (function () {
             else if (t === "fLaC") { tr.codec = "flac"; }
             else { tr.codec = t; tr.unsupported = "音频格式 " + t; }
             tr.mime = "audio/mp4; codecs=\"" + tr.codec + "\"";
+        } else {
+            /* 字幕轨：tx3g（ffmpeg 的 mov_text）、QuickTime 的 text（样本格式一样：2 字节长度 + 文字）、wvtt（ISO 14496-30）。
+             * 不进 SourceBuffer，样本交给 subs.js */
+            tr.codec = t === "text" ? "tx3g" : t;
+            if (t !== "tx3g" && t !== "text" && t !== "wvtt") { tr.unsupported = "字幕格式 " + t; }
         }
         tr.stsd = b.slice(stsd.s, stsd.e);
     }
@@ -252,6 +263,26 @@ var Mp4 = (function () {
         return 0;
     }
 
+    /* mdhd 里的语言：三个 5 位字母（ISO 639-2/T），「und」= 没写 */
+    function mdhdLang(b, mdhd) {
+        var x = u16(b, mdhd.p + (b[mdhd.p] ? 32 : 20));
+        var s = String.fromCharCode(((x >> 10) & 31) + 0x60, ((x >> 5) & 31) + 0x60, (x & 31) + 0x60);
+        return /^[a-z]{3}$/.test(s) && s !== "und" ? s : "";
+    }
+    /* 轨道名：udta/name（ffmpeg 把 title 写在这）→ hdlr 的名字。「SoundHandler」「Core Media Audio」这类编码器默认值不算 */
+    function trackName(b, trak, hdlr) {
+        var s = "", nm = path(b, trak, ["udta", "name"]);
+        if (nm) { s = utf8(b.subarray(nm.p, nm.e)); }
+        else if (hdlr && hdlr.e > hdlr.p + 24) {
+            var n = b.subarray(hdlr.p + 24, hdlr.e);
+            if (n.length && n[0] === n.length - 1) { n = n.subarray(1); }       // QuickTime 的 hdlr 名字是 Pascal 字符串
+            s = utf8(n);
+        }
+        s = s.replace(/\0[\s\S]*$/, "").trim();
+        return /handler|media|^(video|audio|sound|subtitle|text)$|^gpac|^l-smash|^bento|^apple/i.test(s) ? "" : s;
+    }
+    function utf8(a) { try { return new TextDecoder("utf-8").decode(a); } catch (e) { return ""; } }
+
     function parseMoov(b) {
         var moov = { p: 8, e: b.length };
         var top = header(b, 0, 0);
@@ -263,19 +294,24 @@ var Mp4 = (function () {
         var movieDur = mv ? u64(b, mvhd.p + 24) : u32(b, mvhd.p + 16);
         if (child(b, moov, "mvex")) { throw new Error("已经是分段 MP4（fragmented），还不支持"); }
 
-        var tracks = [];
+        var tracks = [], perKind = {};
         children(b, moov.p, moov.e).forEach(function (trak) {
             if (trak.type !== "trak") { return; }
             var hdlr = path(b, trak, ["mdia", "hdlr"]);
             var h = hdlr ? type4(b, hdlr.p + 8) : "";
-            if (h !== "vide" && h !== "soun") { return; }
+            var kind = h === "vide" ? "video" : h === "soun" ? "audio" : h === "sbtl" || h === "text" || h === "subt" ? "sub" : "";
+            if (!kind) { return; }
             var tkhd = child(b, trak, "tkhd");
             var mdhd = path(b, trak, ["mdia", "mdhd"]);
             var stbl = path(b, trak, ["mdia", "minf", "stbl"]);
             var tr = {
-                kind: h === "vide" ? "video" : "audio",
+                kind: kind,
+                index: perKind[kind] = (perKind[kind] === undefined ? 0 : perKind[kind] + 1),     // 同类轨里的第几条（ffprobe 的 a:1 之类）
                 id: u32(b, tkhd.p + (b[tkhd.p] ? 20 : 12)),
-                timescale: u32(b, mdhd.p + (b[mdhd.p] ? 20 : 12))
+                enabled: !!(b[tkhd.p + 3] & 1),          // tkhd 的 track_enabled：多音轨的 MP4 里默认那条是开着的
+                timescale: u32(b, mdhd.p + (b[mdhd.p] ? 20 : 12)),
+                lang: mdhdLang(b, mdhd),
+                name: trackName(b, trak, hdlr)
             };
             describeEntry(b, child(b, stbl, "stsd"), tr);
             sampleTable(b, stbl, tr);
@@ -359,17 +395,18 @@ var Mp4 = (function () {
 
     var MATRIX = [0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000];
 
-    function initSegment(tr) {
+    function initSegment(tr, id) {
         var video = tr.kind === "video";
+        id = id || tr.id;
         var ftyp = box("ftyp", raw(function (w) { w.str("isom"); w.u32(0x200); w.str("isomiso6mp41"); }, 20));
         var mvhd = full("mvhd", 0, 0, raw(function (w) {
             w.u32(0); w.u32(0); w.u32(tr.timescale); w.u32(0);
             w.u32(0x00010000); w.u16(0x0100); w.zeros(10);
             MATRIX.forEach(function (m) { w.u32(m); });
-            w.zeros(24); w.u32(tr.id + 1);
+            w.zeros(24); w.u32(id + 1);
         }, 96));
         var tkhd = full("tkhd", 0, 3, raw(function (w) {
-            w.u32(0); w.u32(0); w.u32(tr.id); w.u32(0); w.u32(0); w.zeros(8);
+            w.u32(0); w.u32(0); w.u32(id); w.u32(0); w.u32(0); w.zeros(8);
             w.u16(0); w.u16(0); w.u16(video ? 0 : 0x0100); w.u16(0);
             MATRIX.forEach(function (m) { w.u32(m); });
             w.u32((tr.width || 0) * 65536); w.u32((tr.height || 0) * 65536);
@@ -384,7 +421,7 @@ var Mp4 = (function () {
             full("stts", 0, 0, new Uint8Array(4)), full("stsc", 0, 0, new Uint8Array(4)),
             full("stsz", 0, 0, new Uint8Array(8)), full("stco", 0, 0, new Uint8Array(4)));
         var trak = box("trak", tkhd, box("mdia", mdhd, hdlr, box("minf", xmhd, dinf, stbl)));
-        var mvex = box("mvex", full("trex", 0, 0, raw(function (w) { w.u32(tr.id); w.u32(1); w.u32(0); w.u32(0); w.u32(0); }, 20)));
+        var mvex = box("mvex", full("trex", 0, 0, raw(function (w) { w.u32(id); w.u32(1); w.u32(0); w.u32(0); w.u32(0); }, 20)));
         return concat([ftyp, box("moov", mvhd, trak, mvex)]);
     }
 
@@ -400,7 +437,7 @@ var Mp4 = (function () {
      * 视频的 edit list 偏移从这里减掉，首帧显示时间落在 0，和音频对齐）。
      * 每个样本的时长 = 到下一个「要放的」样本的解码时间差：跳过的样本（跳转后的前导帧）由前一个样本把时长撑过去 ——
      * 解码时间断开超过两帧，MSE 当成不连续，之后的帧全丢到下一个关键帧为止。 */
-    function fragment(tr, list, seq, copyBytes) {
+    function fragment(tr, list, seq, copyBytes, id) {
         var n = list.length, data = 0, i, j;
         for (j = 0; j < n; j++) { data += tr.size[list[j]]; }
         var moofSize = 8 + 16 + 8 + 16 + 20 + 20 + 16 * n;
@@ -408,7 +445,7 @@ var Mp4 = (function () {
         w.u32(moofSize); w.str("moof");
         w.u32(16); w.str("mfhd"); w.u32(0); w.u32(seq);
         w.u32(moofSize - 24); w.str("traf");
-        w.u32(16); w.str("tfhd"); w.u32(0x020000); w.u32(tr.id);
+        w.u32(16); w.str("tfhd"); w.u32(0x020000); w.u32(id || tr.id);
         w.u32(20); w.str("tfdt"); w.u32(0x01000000); w.u64(tr.dts[list[0]]);
         w.u32(20 + 16 * n); w.str("trun"); w.u32(0x01000F01); w.u32(n); w.u32(moofSize + 8);
         var keys = tr.keys, ki = keys ? keyIndex(tr, list[0]) : 0;
@@ -431,6 +468,31 @@ var Mp4 = (function () {
         return w.b;
     }
 
+    /* 直接给帧拼 moof+mdat（MKV 那条路：没有样本表，帧是拆块拆出来的）。frames 按解码顺序，每个
+     * {dts, cto, dur, key, data}：dts / dur 是这条轨的时间刻度（init 段里的 timescale），cto 可以是负的（trun v1）。 */
+    function fragmentFrames(id, frames, seq) {
+        var n = frames.length, data = 0, j;
+        for (j = 0; j < n; j++) { data += frames[j].data.length; }
+        var moofSize = 8 + 16 + 8 + 16 + 20 + 20 + 16 * n;
+        var w = new W(moofSize + 8 + data);
+        w.u32(moofSize); w.str("moof");
+        w.u32(16); w.str("mfhd"); w.u32(0); w.u32(seq);
+        w.u32(moofSize - 24); w.str("traf");
+        w.u32(16); w.str("tfhd"); w.u32(0x020000); w.u32(id);
+        w.u32(20); w.str("tfdt"); w.u32(0x01000000); w.u64(frames[0].dts);
+        w.u32(20 + 16 * n); w.str("trun"); w.u32(0x01000F01); w.u32(n); w.u32(moofSize + 8);
+        for (j = 0; j < n; j++) {
+            var f = frames[j];
+            w.u32(f.dur);
+            w.u32(f.data.length);
+            w.u32(f.key ? 0x02000000 : 0x01010000);
+            w.u32(f.cto || 0);
+        }
+        w.u32(8 + data); w.str("mdat");
+        for (j = 0; j < n; j++) { w.bytes(frames[j].data); }
+        return w.b;
+    }
+
     /* 关键帧 k 后面、解码顺序在它之后、显示却在它之前的帧（open GOP 的前导帧，HEVC 的 RASL）：它们参考上一个 GOP，
      * 跳转过来时那个 GOP 不在解码器里，解出来是错的，Chrome 的硬件解码直接报 PIPELINE_ERROR_DECODE（桌面实测 x265 默认
      * open-gop）。返回第一个不是前导帧的样本下标；closed GOP 就是 k + 1。 */
@@ -442,7 +504,9 @@ var Mp4 = (function () {
     }
 
     return {
-        scanTop: scanTop, parseMoov: parseMoov, initSegment: initSegment, fragment: fragment, afterLeading: afterLeading,
-        sampleAt: sampleAt, keyAtOrBefore: keyAtOrBefore, keyNear: keyNear, pts: pts
+        scanTop: scanTop, parseMoov: parseMoov, initSegment: initSegment, fragment: fragment, fragmentFrames: fragmentFrames, afterLeading: afterLeading,
+        sampleAt: sampleAt, keyAtOrBefore: keyAtOrBefore, keyNear: keyNear, pts: pts,
+        /* 给 mkv.js 拼 stsd 用的：写盒子的小工具、codecs 字符串 */
+        W: W, box: box, full: full, raw: raw, concat: concat, hex2: hex2, avcString: avcString, hevcString: hevcString
     };
 })();

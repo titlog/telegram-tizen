@@ -36,6 +36,12 @@ var Cover = (function () {
         var cached = await Store.getMoov(item.fileKey);
         if (cached) { return cached; }
         var head = await readRange(src, 0, Math.min(src.size, 64 * 1024));
+        /* MKV：头和 Cues 交给 mkv.js（存进同一个缓存，播放也用得上） */
+        if (typeof Mkv !== "undefined" && Mkv.sniff(head)) {
+            var info = await Mkv.readHead(function (off, len) { return readRange(src, off, Math.min(len, src.size - off)); }, src.size);
+            Store.putMoov(item.fileKey, { mkv: info });
+            return { mkv: info };
+        }
         var top = Mp4.scanTop(head, 0), m = null, pos = 0;
         for (var i = 0; i < top.length; i++) {
             if (top[i].type === "moov") { m = top[i]; break; }
@@ -83,7 +89,8 @@ var Cover = (function () {
                 output: function (f) { if (done) { f.close(); return; } done = true; clearTimeout(timer); resolve(f); },
                 error: function (e) { if (!done) { done = true; clearTimeout(timer); reject(e); } }
             });
-            var cfg = { codec: tr.codec, description: tr.config, codedWidth: tr.width, codedHeight: tr.height };
+            var cfg = { codec: tr.codec, codedWidth: tr.width, codedHeight: tr.height };
+            if (tr.config) { cfg.description = tr.config; }          // VP9 没有 description
             if (hw) { cfg.hardwareAcceleration = hw; }
             dec.configure(cfg);
             dec.decode(new EncodedVideoChunk({ type: "key", timestamp: 0, data: bytes }));
@@ -112,31 +119,44 @@ var Cover = (function () {
     async function grabInner(item) {
         if (!window.VideoDecoder) { throw new Error("这台电视没有 WebCodecs"); }
         var t0 = performance.now(), src = TG.source(item);
-        var mv = await moovOf(item, src);
-        var movie = Mp4.parseMoov(mv.bytes);
-        var v = movie.tracks.filter(function (t) { return t.kind === "video"; })[0];
-        if (!v || !v.config) { throw new Error("没有能解的视频轨"); }
-        var sup = await VideoDecoder.isConfigSupported({ codec: v.codec, description: v.config, codedWidth: v.width, codedHeight: v.height });
+        var mv = await moovOf(item, src), movie, v;
+        if (mv.mkv) {
+            movie = { duration: mv.mkv.duration };
+            v = mv.mkv.tracks.filter(function (t) { return t.kind === "video" && !t.unsupported; })[0];
+            if (!v || !mv.mkv.cues) { throw new Error(v ? "MKV 没有 Cues，找不到关键帧" : "没有能解的视频轨"); }
+        } else {
+            movie = Mp4.parseMoov(mv.bytes);
+            v = movie.tracks.filter(function (t) { return t.kind === "video"; })[0];
+            if (!v || !v.config) { throw new Error("没有能解的视频轨"); }
+        }
+        var sup = await VideoDecoder.isConfigSupported({ codec: v.codec, description: v.config || undefined, codedWidth: v.width, codedHeight: v.height });
         if (!sup.supported) { throw new Error("WebCodecs 不支持 " + v.codec); }
         var W = 576, H = 324, c = document.createElement("canvas");
         c.width = W; c.height = H;
         var g = c.getContext("2d"), best = null, bestLum = -1, tries = [];
         var fracs = [0.12, 0.3, 0.5];
         for (var i = 0; i < fracs.length; i++) {
-            var k = Mp4.keyAtOrBefore(v, Mp4.sampleAt(v, movie.duration * fracs[i]));
-            var tr0 = performance.now();
-            var bytes = await readRange(src, v.offset[k], v.size[k]);
+            var tr0 = performance.now(), bytes, at;
+            if (mv.mkv) {
+                var kf = await Mkv.keyframeAt(function (off, len) { check(); return readRange(src, off, Math.min(len, src.size - off)); }, mv.mkv, movie.duration * fracs[i]);
+                bytes = kf.data;
+                at = kf.pts;
+            } else {
+                var k = Mp4.keyAtOrBefore(v, Mp4.sampleAt(v, movie.duration * fracs[i]));
+                bytes = await readRange(src, v.offset[k], v.size[k]);
+                at = Mp4.pts(v, k);
+            }
             var td = performance.now();
             check();
             var f;
             try { f = await decodeAny(v, bytes, tries); }
-            catch (e) { tries.push(Math.round(Mp4.pts(v, k)) + "s 解不了"); continue; }
+            catch (e) { tries.push(Math.round(at) + "s 解不了"); continue; }
             g.fillStyle = "#000";
             g.fillRect(0, 0, W, H);
             draw(g, f, W, H);
             f.close();
             var lum = luminance(g, W, H);
-            tries.push(Math.round(Mp4.pts(v, k)) + "s 读 " + Math.round(td - tr0) + "ms 解 " + Math.round(performance.now() - td) + "ms 亮度 " + Math.round(lum));
+            tries.push(Math.round(at) + "s 读 " + Math.round(td - tr0) + "ms 解 " + Math.round(performance.now() - td) + "ms 亮度 " + Math.round(lum));
             if (lum > bestLum) { bestLum = lum; best = await toJpeg(c); }
             if (lum >= 45) { break; }
         }
@@ -180,7 +200,9 @@ var Cover = (function () {
         var t = item.title.replace(NOISE, " ").replace(/[\[\]【】()（）《》]/g, " ").replace(/\b(19|20)\d\d\b/g, " ");
         var zh = (t.match(/[\u4e00-\u9fff·：:！!0-9]+/g) || []).join(" ").trim();
         var en = t.replace(/[\u4e00-\u9fff·！]/g, " ").replace(/\s+/g, " ").trim();
-        var year = item.info && item.info.year ? " " + item.info.year : "";
+        /* 年份：说明文字里的，没有就用片名里的（文件名当片名的「The Last Emperor 1987」） */
+        var yr = (item.info && item.info.year) || ((/\b(19[2-9]\d|20[0-4]\d)\b/.exec(item.title) || [])[1]) || "";
+        var year = yr ? " " + yr : "";
         var tries = [];
         if (/[\u4e00-\u9fff]{2}/.test(zh)) { tries.push(["zh", zh, zh + year + " 电影"]); }
         if (/[a-z]{3}/i.test(en)) { tries.push(["en", en, en + year + " film"]); }

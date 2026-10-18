@@ -6,10 +6,12 @@
 出发点（2026-10-01）：Telegram 的群和频道里有不少视频，手机上能直接放，电视上没有能用的客户端。
 
 ```
-app/js/app.js     界面和遥控器：登录（扫码）、主页（左边来源、右边视频网格）、播放器浮层
-app/js/tg.js      Telegram 这一层：来源（收藏夹 + 群/频道）、来源里的视频、封面、给播放器的数据源（文件引用过期自动刷新）
-app/js/player.js  播放引擎：MediaSource + 音视频两个 SourceBuffer，按样本在文件里的位置顺序读、拼 ~1 秒一段
-app/js/mp4.js     自己写的渐进式 MP4 → fMP4：样本表 TypedArray、二分找关键帧、拼 moof+mdat（替掉了 mp4box）
+app/js/app.js     界面和遥控器：登录（扫码）、主页（左边来源、右边视频网格）、播放器浮层、长按确认的菜单（音轨 / 字幕）、下一集、搜索
+app/js/tg.js      Telegram 这一层：来源（群/频道）、来源里的视频（「视频」+「文件」两路合并）、搜索、群里的字幕文件、封面、给播放器的数据源
+app/js/player.js  播放引擎：MediaSource + 音视频两个 SourceBuffer，按样本在文件里的位置顺序读、拼 ~1 秒一段；MKV 走 mkv.js 拆块
+app/js/mp4.js     自己写的渐进式 MP4 → fMP4：样本表 TypedArray、二分找关键帧、拼 moof+mdat（替掉了 mp4box）；也认 tx3g 字幕轨
+app/js/mkv.js     自己写的 MKV / WebM：读头和 Cues、按 Cluster 顺序拆块、算解码时间，交给 Mp4.fragmentFrames
+app/js/subs.js    字幕：外挂文件（SRT/ASS/VTT，GBK/Big5 自动认）、tx3g、MKV 的文字和 PGS 图形字幕、画到屏幕上
 app/js/web.js     网页链接：按站点规则解析出视频地址（XHR，不行就隐藏框）、hls.js 放（vendor/hls.min.js）；列表页当来源、翻页、登录查账号编号
 app/js/sites.local.js  站点规则（Web.register），本机自己写，不进仓库
 app/js/store.js   本地：看到哪里（localStorage）、上次的来源、moov 缓存（IndexedDB，留 12 个）
@@ -17,6 +19,8 @@ build/src/        mtcute 打包：worker.js（后台线程里的客户端）先�
 tools/deploy.sh   打包、写入上报地址和凭证、签名、安装、启动；打完包把凭证改回空值
 tools/collect.mjs 日志收集，:8097（抖音 :8098、bilibili :8099）
 test/check.mjs    mp4.js 离线校验（对照 ffprobe，拼出来的 fMP4 交给 ffmpeg 解码）
+test/check-mkv.mjs  mkv.js 离线校验（测试片 test/media/mkv/，生成命令在文件头；要 ffmpeg + mkvtoolnix）
+test/check-subs.mjs subs.js 校验（编码、格式、tx3g、MKV 块；PGS 和 ffmpeg 的渲染逐像素比）
 test/run.mjs      播放引擎桌面测试（Playwright + test/serve.mjs 限速模拟电视）
 test/web.mjs      网页链接那条路：真网站解析 → hls.js 放 → 跳转（NOXHR=1 走隐藏框）
 test/weblist.mjs  网页列表：真网站取第一页再翻两页；要登录的列表应报 needLogin
@@ -31,8 +35,10 @@ spike/            探测版（mp4box）和引擎测量脚本，不进包
 node tools/collect.mjs | tee -a logs/app.log     # 终端 1
 zsh tools/deploy.sh                              # 终端 2
 node test/check.mjs test/media/*.mp4             # 改 mp4.js 之后（测试片用 ffmpeg 生成，见 test/check.mjs 头）
+node test/check-mkv.mjs test/media/mkv/*.mkv test/media/mkv/*.webm   # 改 mkv.js 之后
+node test/check-subs.mjs                         # 改 subs.js 之后
 node test/serve.mjs & node test/run.mjs media/a_h264_fast.mp4 "media/b_h264_moovend.mp4?start=30"   # 改 player.js 之后
-node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png
+node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv 只跑最后 MKV 那段）
 ```
 
 ## 可行性探测的结果（2026-10-01 设备实测，参考机同 bilibili / 抖音那台）
@@ -167,3 +173,52 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
   用户 10-02 发现，装回之后按用户要求把编号改成了 **`BiliTvApp0.Bilibili`**（bilibili 仓库 c604fcf）。**卸电视上的应用之前先列出来、对照各项目的 config.xml、问用户。**
 - **部署卡死**：Mac 上一个跑了 17 小时的旧 sdb 服务，`sdb devices` 显示 device，`sdb shell echo` 却不回，`tizen install`
   一声不吭等了 13 分钟。deploy.sh 现在装之前先试 `shell echo`，不通就 `sdb kill-server` 重连；安装超过 4 分钟算失败。
+
+## MKV、多音轨、字幕、下一集、搜索（2026-10-18）
+
+用户问「还需要什么新功能」，列了五样（MKV、换音轨、字幕、自动下一集、搜索），回答「全都做」。**以下全是桌面测出来的，电视上还没验证。**
+
+**当文件发的视频**：MKV 几乎都是当文件发的，它们在 Telegram 的「文件」里，`inputMessagesFilterVideo` 筛不出来 —— 第一版网格里根本
+看不到 MKV。现在 `TG.videos` 是「视频」「文件」两路按时间合并（文件那一路按扩展名 / mime 挑 mkv/webm/mp4/m4v/mov，顺手记下 .srt/.ass），
+翻页的游标（`page.next`）是个对象，app 原样传回去。一个「视频」都没有的会话，再看最近 40 个文件里有没有当文件发的。
+当文件发的没有时长（Telegram 不知道），放过一次记下来（`tg.dur.v1`）；片名从文件名里取（`The.Last.Emperor.1987.1080p…` →「The Last Emperor 1987」）。
+
+**MKV（mkv.js）**：开头 4 字节 EBML 魔数认出来。`readHead` 读头和 Cues —— 一般 2 次请求（开头 512KB + 文件尾的 Cues），结果存进 moov 那个缓存。
+之后从 Cue 指的 Cluster 顺序拆块，一路读（MKV 里同一时刻的音视频挨着放，不用分路）。
+- MKV 只有显示时间。解码时间 = 「还没用掉的显示时间里最小的」，压几帧再定（排序窗口）。**窗口从 4 帧起、碰到更深的重排才加**：第一版固定 16 帧，
+  跳转后第一段要多等 16 帧（4K 一帧几百 KB），桌面跳转 1.4 秒；x264 / x265 开 16 个 B 帧的金字塔，实际重排深度也只到 4，算出的解码时间和
+  排好序的显示时间逐帧一致。
+- 拼段也和 MP4 一样「窗口里拆出多少拼多少」，不等凑满一秒（不然跳转后第一段多下一秒的字节）。从头放时，认出 MKV 时下的那一块留着接着拆，省一次请求。
+- 桌面（限速 2MB/s、每请求 400ms）：从头放 1.6 秒（moov 在开头的 MP4 0.8 秒，差在多读一次 Cues）、续播 1.9–2.4 秒、跳转 0.75 秒（和 MP4 一样）。
+- AC-3 / E-AC-3 的 dac3 / dec3 要从第一帧的同步帧头解，多数在 readHead 那 512KB 里就解出来了。DTS、TrueHD、Vorbis、PCM 放不了（三星这代不解 DTS），
+  有别的音轨就自动换一条，只有这一条就无声放、提示一下。**MP3 音轨桌面 Chrome 的 MSE 不认，电视上不知道。**
+- 测试片 16 个（ffmpeg 和 mkvmerge 各做一批：lacing 三种、header stripping、大小未知的 Cluster、没有 Cues、BlockGroup、zlib 字幕），
+  `test/check-mkv.mjs` 逐帧对 ffprobe、拼出来的 fMP4 交给 ffmpeg 解码。
+
+**换音轨 = 在当前位置重开**，不在原来的 MediaSource 上换：换编码要 `SourceBuffer.changeType`，三星电视的 MSE 是自己的实现，没验证过，重开最稳。
+重开时 `exact`：清完缓冲把播放头放在原来那一秒（关键帧和它之间的帧解码但不显示），桌面上换完接着原处放。每部片选过的音轨记在 `tg.prefs.v1`。
+MP4 的默认音轨看 tkhd 的 enabled，MKV 看 FlagDefault；轨道名 MP4 读 hdlr 的名字（ffmpeg 的 `handler_name`），「SoundHandler」这类默认值不算。
+
+**字幕**：三个来源 —— MP4 的 tx3g（读音视频时顺带从窗口里拿，不留住窗口；整条轨挤在一小段里的开头单独读一次）、MKV 的字幕块、
+和片子发在同一个群里的 .srt/.ass（按文件名同前缀、片名、发的时间和消息编号打分，≥ 3 算「就是它」）。
+默认开哪个：这部片子上次选过的 → 强制字幕 → **对白不是中文时**开中文字幕（片子里的优先，再看名字对得上的文件）→ 关。对白是中文不自动开（国产片多半硬字幕）。
+PGS 一个显示集几 KB 到几十 KB、蓝光 remux 常带四五条：定下之后只存正在显示的那条；中途换到别的 PGS 轨时让播放器从当前位置重读（`player.refetch`）。
+字幕时间可以 ±0.5 秒调（外挂字幕和片源版本不同常差几秒），按片子记。
+
+**长按确认键开菜单**（650ms，和 bilibili 客户端卡片上的长按一样，松开时才判断短按）：音轨、字幕、字幕时间、下一集。
+桌面测试抓到：**按住时遥控器的自动重复会在刚弹出的菜单里「按确认」**，菜单一闪就关了（bilibili 那边也专门挡过）—— 按住期间的确认键一律不算。
+在卡片上按确认进播放器，那一下的自动重复和松开也落在播放器里，要等它松开过一次才认确认键。
+
+**下一集**：标题和文件名里认集数（S01E02、第3集/第三话、EP02、[02]、「 - 02」），剧名 = 去掉集数和画质字样剩下的。放完在已加载的列表里找同一部剧
+集数最小的下一集，没有就往后翻最多 3 页再找；右下角倒计时 8 秒，确认现在放、返回不放。
+
+**搜索**：来源栏第 0 项。`searchGlobal` 搜「视频」和「文件」两路（文件名对得上的 MKV 也出来），结果当一个来源放在网格里（卡片上写群名）。
+搜过的词留 12 个（遥控器打字慢）。搜索结果不记成「上次的来源」，开机还是进上次的群。
+
+播放时提示条（toast）挪到屏幕上方：在下面会盖住字幕（截图看出来的）。
+
+**电视上要验证的**：MKV 能不能放（尤其 AC-3、HEVC）、换音轨重开停在原处、字幕显示、长按确认（真遥控器的自动重复间隔）、
+下一集倒计时；还有之前那条 —— 切到别的应用一分钟以上再回来、后台线程重连。10-18 13:32 装上，用户 13:46 说「都试了都没问题」；
+但那段日志里只有一次 MP4 播放（3.7GB、6.6 秒出画面），MKV、换音轨、选字幕、搜索、下一集都会写日志，一条都没有 —— **当作还没验证**，
+下次在电视上看到这几样的日志再划掉。
+

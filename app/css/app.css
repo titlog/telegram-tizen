@@ -77,6 +77,18 @@ video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; back
               border-radius: 50%; animation: rot 0.9s linear infinite; }
 #spin-text { margin-top: 24px; font-size: 28px; color: #c5cad0; text-shadow: 0 0 6px #000; }
 @keyframes rot { to { transform: rotate(360deg); } }
+/* ---------- 字幕（subs.js） ---------- */
+/* 文字字幕：底部居中，白字黑边（text-shadow 一圈，不用滤镜）；进度条浮层出来时整体抬到它上面（#player.ovon） */
+#sub { position: absolute; left: 140px; width: 1640px; bottom: 64px; text-align: center; font-size: 54px; line-height: 1.32;
+       color: #fff; white-space: pre-line; pointer-events: none; font-weight: 600;
+       text-shadow: -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 3px 3px 0 #000, 0 3px 0 #000, 0 -3px 0 #000, 3px 0 0 #000, -3px 0 0 #000, 0 0 10px #000; }
+/* 要放在上面的（ASS 的 \an7–9、标牌字幕） */
+#subtop { position: absolute; left: 140px; width: 1640px; top: 56px; text-align: center; font-size: 46px; line-height: 1.32;
+          color: #fff; white-space: pre-line; pointer-events: none; font-weight: 600;
+          text-shadow: -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 3px 3px 0 #000, 0 3px 0 #000, 0 -3px 0 #000, 3px 0 0 #000, -3px 0 0 #000, 0 0 10px #000; }
+#player.ovon #sub { bottom: 280px; }
+#subpic { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none; }
+
 #perr { position: absolute; left: 200px; top: 400px; width: 1520px; text-align: center; font-size: 36px; line-height: 1.6;
         display: none; }
 
@@ -93,9 +105,46 @@ video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; back
 #pw { font-size: 40px; width: 700px; padding: 10px; margin-top: 16px; }
 
 #toast { position: absolute; left: 0; bottom: 70px; width: 1920px; text-align: center; display: none; }
+/* 播放时提示条放上面：底下是字幕的位置 */
+#player.on ~ #toast { bottom: auto; top: 60px; }
 #toast span { display: inline-block; background: rgba(30, 36, 44, 0.95); color: #fff; font-size: 30px; padding: 16px 36px; border-radius: 40px; }
 #lines { position: absolute; left: 40px; top: 20px; width: 1300px; font-size: 20px; line-height: 1.4; color: #ffd27a;
          text-shadow: 0 0 4px #000; pointer-events: none; }
+
+/* ---------- 播放器里的菜单（长按确认键）---------- */
+#menu { position: absolute; right: 0; top: 0; width: 720px; height: 1080px; background: rgba(14, 17, 21, 0.95); display: none;
+        box-shadow: -12px 0 40px rgba(0, 0, 0, 0.6); }
+#menu.on { display: block; }
+#menu-wrap { position: absolute; left: 0; top: 0; width: 720px; height: 980px; overflow: hidden; }
+#menu-list { padding-top: 36px; will-change: transform; }
+#menu .mh { font-size: 26px; color: #7d858e; padding: 26px 48px 8px; }
+#menu .mi { font-size: 32px; height: 68px; line-height: 68px; padding: 0 40px 0 48px; white-space: nowrap; overflow: hidden;
+            text-overflow: ellipsis; color: #d0d4d8; }
+#menu .mi .ck { display: inline-block; width: 44px; color: #2aabee; }
+#menu .mi.dis { color: #5a626b; }
+#menu .mi.focus { background: #2aabee; color: #fff; }
+#menu .mi.focus .ck { color: #fff; }
+#menu-foot { position: absolute; left: 48px; bottom: 34px; font-size: 24px; color: #6b737c; }
+
+/* 放完了、有下一集：右下角倒计时 */
+#upnext { position: absolute; right: 80px; bottom: 110px; width: 760px; background: rgba(14, 17, 21, 0.94); border-radius: 14px;
+          padding: 30px 40px; display: none; box-shadow: 0 0 40px rgba(0, 0, 0, 0.6); }
+#upnext.on { display: block; }
+#upnext .h { font-size: 26px; color: #8b939b; }
+#upnext .t { font-size: 40px; margin-top: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#upnext .k { font-size: 26px; color: #8b939b; margin-top: 18px; }
+
+/* 搜索 */
+#sx { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: rgba(10, 13, 16, 0.96); display: none; }
+#sx.on { display: block; }
+#sx .box { position: absolute; left: 460px; top: 150px; width: 1000px; }
+#sx .h { font-size: 56px; margin-bottom: 24px; }
+#sx .sub { font-size: 28px; line-height: 1.6; color: #8b939b; margin-bottom: 36px; }
+#sx input { font-size: 44px; width: 960px; padding: 14px 18px; border: 3px solid #3a424b; border-radius: 10px; background: #1b2128; color: #fff; outline: none; }
+#sx input:focus { border-color: #2aabee; }
+#sx .lab { font-size: 26px; color: #7d858e; margin: 40px 0 12px; }
+#sx-recent .q { display: inline-block; font-size: 30px; padding: 10px 26px; margin: 0 16px 16px 0; border-radius: 30px; background: #1b2128; color: #c5cad0; }
+#sx-recent .q.focus { background: #2aabee; color: #fff; }
 
 /* 网页登录 */
 #wl { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: rgba(10, 13, 16, 0.94); display: none; }

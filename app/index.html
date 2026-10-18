@@ -24,14 +24,22 @@
 <!-- 播放器 -->
 <div id="player">
   <video id="v"></video>
+  <!-- 字幕（subs.js）：图形字幕（PGS）画在画布上，文字字幕是 div -->
+  <canvas id="subpic" width="1920" height="1080"></canvas>
+  <div id="sub"></div>
+  <div id="subtop"></div>
   <div id="spin"><div class="ring"></div><div id="spin-text"></div></div>
   <div id="seekhint"></div>
   <div id="ov">
     <div id="ov-title"></div>
     <div id="ov-bar"><div id="ov-buf"></div><div id="ov-fill"></div><div id="ov-dot"></div></div>
-    <div id="ov-row"><span id="ov-time"></span><span id="ov-keys">确认 暂停 · ←→ ↑↓ 快进快退（按住越来越快）· 返回 回列表</span></div>
+    <div id="ov-row"><span id="ov-time"></span><span id="ov-keys">确认 暂停 · 长按确认 音轨 / 字幕 · ←→ ↑↓ 快进快退（按住越来越快）· 返回 回列表</span></div>
   </div>
   <div id="perr"></div>
+  <!-- 长按确认键：音轨、字幕、字幕时间、下一集 -->
+  <div id="menu"><div id="menu-wrap"><div id="menu-list"></div></div><div id="menu-foot">↑↓ 选 · 确认 · ←→ 调字幕时间 · 返回 关掉</div></div>
+  <!-- 放完了、有下一集 -->
+  <div id="upnext"><div class="h">接着放下一集</div><div class="t" id="upnext-t"></div><div class="k" id="upnext-k"></div></div>
 </div>
 
 <!-- 登录 -->
@@ -56,6 +64,17 @@
   </div>
 </div>
 
+<!-- 搜索 -->
+<div id="sx">
+  <div class="box">
+    <div class="h">搜索</div>
+    <div class="sub">在你所有的群和频道里找视频：片名、说明文字、文件名都算。<br>用遥控器输入，输完按屏幕键盘上的「完成」。按返回键取消。</div>
+    <input id="sx-q" type="text" autocomplete="off">
+    <div class="lab" id="sx-lab">最近搜过（按 ↓ 选）</div>
+    <div id="sx-recent"></div>
+  </div>
+</div>
+
 <div id="toast"></div>
 <div id="lines"></div>
 
@@ -63,6 +82,7 @@
 <script src="js/log.js"></script>
 <script src="js/tg.bundle.js"></script>
 <script src="js/mp4.js"></script>
+<script src="js/mkv.js"></script>
 <script src="js/player.js"></script>
 <script src="js/vendor/hls.min.js"></script>
 <script src="js/web.js"></script>
@@ -71,6 +91,7 @@
 <script src="js/tg.js"></script>
 <script src="js/store.js"></script>
 <script src="js/cover.js"></script>
+<script src="js/subs.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

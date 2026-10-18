@@ -5,7 +5,12 @@ var TG = (function () {
 
     var client = null, mode = "", remake = null, reconnecting = null, reconnects = 0;
     var VIDEO = { _: "inputMessagesFilterVideo" };
+    var DOCS = { _: "inputMessagesFilterDocument" };
     var URLS = { _: "inputMessagesFilterUrl" };
+    /* 当文件发的视频：MKV 几乎都是这么发的，MP4 选「不压缩」发也是。它们在 Telegram 的「文件」里，「视频」筛不出来
+     * （手机上能放，是因为手机客户端认扩展名）。avi / rmvb / ts 之类电视放不了，不列。 */
+    var VIDEO_EXT = /\.(mkv|webm|mp4|m4v|mov)$/i, VIDEO_MIME = /^video\/(x-matroska|webm|mp4|quicktime|x-m4v)$/i;
+    var SUB_EXT = /\.(srt|ass|ssa|vtt)$/i;
 
     function timeout(p, ms, what) {
         return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error(what + " " + ms / 1000 + " 秒没回")); }, ms); })]);
@@ -81,23 +86,124 @@ var TG = (function () {
         return out;
     }
 
-    /* 这个来源里有几个视频（只问数量，limit 1） */
+    function isVideoMsg(m) { var d = m.media; return !!d && d.type === "video" && !d.isRound && !d.isAnimation; }
+    function isVideoDoc(m) {
+        var d = m.media;
+        return !!d && d.type === "document" && (VIDEO_EXT.test(d.fileName || "") || VIDEO_MIME.test(d.mimeType || ""));
+    }
+
+    /* 这个来源里有几个视频（只问数量，limit 1）。一个「视频」都没有的，再看最近 40 个文件里有没有当文件发的（只有 MKV 的群） */
     async function videoCount(sourceId) {
         var res = await again(function () { return client.searchMessages({ chatId: sourceId, filter: VIDEO, limit: 1 }); });
-        return res.total || res.length;
+        var n = res.total || res.length;
+        if (n) { return n; }
+        var docs = await again(function () { return client.searchMessages({ chatId: sourceId, filter: DOCS, limit: 40 }); });
+        docs.forEach(noteSub);
+        return docs.filter(isVideoDoc).length;
+    }
+
+    /* 「视频」和「文件」两路按时间合并成一串，新的在前。cursor 由 app 存着、原样传回来（page.next）。
+     * 文件那一路里大多不是视频（PDF、压缩包、字幕…）：翻到的字幕文件顺手记下来（subtitlesFor 用）。
+     * 两路各自一页一页往前翻；文件那一路暂时没有视频时，要翻到比视频那一路的下一个更早的时间，才能确定先出哪个
+     * （每次最多多翻 4 页，翻不到就先按手上的出，顺序可能差一点）。 */
+    function run(fetch, keep) { return { fetch: fetch, keep: keep, next: undefined, buf: [], end: false, minDate: Infinity, total: 0, kept: 0 }; }
+    async function pull(r) {
+        var res = await again(function () { return r.fetch(r.next); });
+        r.total = res.total || 0;
+        res.forEach(function (m) {
+            if (m.date.getTime() < r.minDate) { r.minDate = m.date.getTime(); }
+            if (r.keep(m)) { r.buf.push(describe(m)); r.kept++; }
+            else { noteSub(m); }
+        });
+        r.next = res.next;
+        if (!res.length || res.next === undefined) { r.end = true; }
+    }
+    async function merged(c, limit) {
+        var v = c.v, d = c.d, out = [], extra = 0;
+        if (!c.started) { c.started = true; await Promise.all([pull(v), pull(d)]); }
+        while (out.length < limit) {
+            if (!v.buf.length && !v.end) { await pull(v); continue; }
+            var a = v.buf[0], b = d.buf[0];
+            if (!b && !d.end && (!a || a.date.getTime() < d.minDate) && extra < 4) { extra++; await pull(d); continue; }
+            if (!a && !b) { break; }
+            out.push((a && (!b || a.date >= b.date) ? v : d).buf.shift());
+        }
+        var more = v.buf.length || d.buf.length || !v.end || !d.end;
+        return { items: out, next: more ? c : undefined, total: v.total + d.kept };
     }
 
     /* 一个来源里的视频，新的在前。page.next 传回来取下一页。 */
-    async function videos(sourceId, next, limit) {
-        var res = await again(function () { return client.searchMessages({ chatId: sourceId, filter: VIDEO, limit: limit || 40, offset: next }); });
-        var items = [];
-        res.forEach(function (m) {
-            var d = m.media;
-            if (!d || d.type !== "video" || d.isRound || d.isAnimation) { return; }
-            items.push(describe(m));
-        });
-        return { items: items, next: res.next, total: res.total };
+    function videos(sourceId, cursor, limit) {
+        var c = cursor || {
+            v: run(function (next) { return client.searchMessages({ chatId: sourceId, filter: VIDEO, limit: 40, offset: next }); }, isVideoMsg),
+            d: run(function (next) { return client.searchMessages({ chatId: sourceId, filter: DOCS, limit: 40, offset: next }); }, isVideoDoc)
+        };
+        return merged(c, limit || 40);
     }
+
+    /* 搜索（所有会话里的视频，加上文件名对得上的视频文件）。用法同 videos */
+    function search(query, cursor, limit) {
+        var c = cursor || {
+            v: run(function (next) { return client.searchGlobal({ query: query, filter: VIDEO, limit: 40, offset: next }); }, isVideoMsg),
+            d: run(function (next) { return client.searchGlobal({ query: query, filter: DOCS, limit: 40, offset: next }); }, isVideoDoc)
+        };
+        return merged(c, limit || 40);
+    }
+
+    /* ---------- 字幕文件（.srt / .ass 和片子发在同一个群里） ---------- */
+
+    var subFiles = {};      // 会话 id → {消息 id: {name, date, id, doc, size}}
+    function noteSub(m) {
+        var d = m.media;
+        if (!d || d.type !== "document" || !SUB_EXT.test(d.fileName || "")) { return; }
+        var k = String(m.chat.id);
+        (subFiles[k] = subFiles[k] || {})[m.id] = { name: d.fileName, date: m.date, id: m.id, doc: d, size: d.fileSize || 0 };
+    }
+    function stem(n) { return String(n || "").replace(/\.[a-z0-9]{2,4}$/i, "").toLowerCase().replace(/[\s._\-\[\]()（）【】]+/g, " ").trim(); }
+    /* 字幕文件名里的语言：chs / sc / 简 → 简体，cht / tc / 繁 → 繁体，两个都有 / 双语 → 中英 */
+    function subLang(name) {
+        var n = stem(name).replace(/\s/g, "."), zh = /(^|\.)(chs|sc|gb|zh-?(hans|cn)|简体?|简中)(\.|$)/.test(n) || /简/.test(name),
+            tw = /(^|\.)(cht|tc|big5|zh-?(hant|tw|hk)|繁體?|繁中)(\.|$)/.test(n) || /繁/.test(name),
+            en = /(^|\.)(eng?|english)(\.|$)/.test(n) || /英/.test(name);
+        if (/双语|雙語/.test(name) || ((zh || tw) && en)) { return "中英"; }
+        return zh ? "简体" : tw ? "繁体" : en ? "英文" : "";
+    }
+    /* 给这个视频挑字幕文件：文件名同前缀最像（Movie.2001.1080p.mkv ↔ Movie.2001.1080p.chs.srt）；片名在文件名里；
+     * 发的时间、消息编号挨着。分数 ≥ 1 才列，≥ 3 算「就是它」（app 自动打开）。 */
+    function subScore(item, s) {
+        var vs = stem(item.fileName), ss = stem(s.name), t = stem(item.title).replace(/\s/g, ""), score = 0;
+        if (vs.length > 3 && ss.indexOf(vs) === 0) { score += 3; }
+        else if (vs) {
+            var tok = vs.split(" ").filter(function (x) { return x.length > 1; }), hit = tok.filter(function (x) { return ss.indexOf(x) >= 0; }).length;
+            if (tok.length) { score += 2.5 * hit / tok.length; }
+        }
+        if (t.length > 1 && ss.replace(/\s/g, "").indexOf(t) >= 0) { score += 2; }
+        var dt = Math.abs(s.date - item.date) / 60000;
+        score += dt < 10 ? 1.5 : dt < 180 ? 0.5 : 0;
+        if (item.msg && Math.abs(s.id - item.msg.id) <= 3) { score += 1; }
+        return score;
+    }
+    var subLooked = {};
+    async function subtitlesFor(item) {
+        if (!item.msg || !item.msg.chat) { return []; }
+        var k = String(item.msg.chat.id);
+        /* 从搜索打开的、或者那个群的文件还没翻到这条的时间：按这条的时间问一次（它前后发的文件） */
+        var lk = k + ":" + Math.floor(item.date.getTime() / 86400000);
+        if (!subLooked[lk]) {
+            subLooked[lk] = true;
+            try {
+                var res = await again(function () { return client.searchMessages({ chatId: item.msg.chat.id, filter: DOCS, limit: 40, maxDate: new Date(item.date.getTime() + 2 * 86400000) }); });
+                res.forEach(noteSub);
+            } catch (e) { Log.report("tg", "找字幕文件出错 " + (e && e.message)); }
+        }
+        var all = subFiles[k] || {};
+        return Object.keys(all).map(function (id) {
+            var s = all[id];
+            return { name: s.name, lang: subLang(s.name), size: s.size, score: subScore(item, s), doc: s.doc };
+        }).filter(function (s) { return s.score >= 1 && s.size < 8 * 1048576; })
+          .sort(function (a, b) { return b.score - a.score; }).slice(0, 8);
+    }
+    function download(doc) { return again(function () { return client.downloadAsBuffer(doc); }); }
 
     /* 网页链接（见 web.js）：最近的 limit 条带链接的消息里，认识的站、或者直接是 .m3u8 / .mp4 的。带视频的消息（说明文字里
      * 常有频道链接）不算，那条已经在视频里了。新的在前。 */
@@ -165,7 +271,22 @@ var TG = (function () {
      * 没有就去掉 #标签（只剩标签时保留标签的字）。链接、@提及都去掉。没有说明文字用文件名。
      * 第一版把 #标签连字一起删了，电视上只剩「《 国语 高清》」（用户 2026-10-01 拍照报的）。 */
     function title(m) {
-        return captionTitle(m) || ((m.media && m.media.fileName) || "视频").replace(/\.[a-z0-9]{2,4}$/i, "");
+        return captionTitle(m) || nameTitle((m.media && m.media.fileName) || "视频");
+    }
+    /* 文件名当片名：「The.Last.Emperor.1987.1080p.BluRay.x264-WiKi.mkv」→「The Last Emperor 1987」。开头的 [字幕组] 去掉，
+     * 年份留着、年份后面（分辨率、片源、编码、发布组）截掉；没有年份就截在第一个分辨率 / 片源词上。集数（S01E02、第3集）不截。 */
+    function nameTitle(fn) {
+        var base = fn.replace(/\.[a-z0-9]{2,4}$/i, ""), s = base.replace(/\[[^\]]*\]/g, " ").trim();
+        /* 整个名字都在方括号里（「[字幕组][进击的巨人][第01集]」）：第一组多半是字幕组，用后面的 */
+        if (!s) { var gs = (base.match(/\[([^\]]*)\]/g) || []).map(function (g) { return g.slice(1, -1); }); s = (gs.length > 1 ? gs.slice(1) : gs).join(" "); }
+        if (/[\u4e00-\u9fff]/.test(s) && !/\.\w+\./.test(s)) { return s.trim() || fn; }
+        var t = s.replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
+        var cut = /\b(2160p|1080[pi]|720p|480p|4k|uhd|blu-?ray|bdrip|brrip|web-?dl|webrip|hdtv|dvdrip|remux|x26[45]|h ?26[45]|hevc|avc|hdr|dts|aac|ac3)\b/i.exec(t);
+        if (cut) { t = t.slice(0, cut.index); }
+        var yr = /^(.+?\b(19|20)\d\d)\b/.exec(t);
+        if (yr && !/\bS\d{1,2}E\d{1,3}\b/i.test(t.slice(yr[1].length))) { t = yr[1]; }
+        t = t.replace(/[\s\-–([]+$/, "").trim();
+        return t.length > 1 ? t : fn;
     }
     function captionTitle(m) {
         var lines = (m.text || "").split("\n").map(function (s) {
@@ -200,6 +321,8 @@ var TG = (function () {
             fileKey: d.uniqueFileId,                // 同一个文件转发到不同地方也一样
             msg: m,
             doc: d,
+            asFile: d.type === "document",          // 当文件发的（没有时长、宽高，播放时才知道）
+            chatTitle: (m.chat && (m.chat.title || m.chat.displayName)) || "",
             title: title(m),
             fileName: d.fileName || "",
             caption: m.text || "",
@@ -272,7 +395,7 @@ var TG = (function () {
 
     return {
         init: init, me: me, login: login, logout: logout, sources: sources, videos: videos, links: links, videoCount: videoCount, thumb: thumb, cover: cover, source: source,
-        searchGlobal: function (q) { return again(function () { return client.searchGlobal({ query: q, limit: 50, filter: VIDEO }); }); },
+        search: search, subtitlesFor: subtitlesFor, download: download,
         describe: describe,
         mode: function () { return mode; },
         primaryDc: function () { return client.getPrimaryDcId(); }

@@ -42,6 +42,46 @@ var Store = (function () {
     function noFrame(key) { return noF[key] && Date.now() - noF[key] < 7 * 86400000; }
     function markNoFrame(key) { noF[key] = Date.now(); write(FKEY, noF); }
 
+    /* 每部片子自己的选择：音轨、字幕、字幕时间偏移（秒）。fileKey → {audio, sub, off, at}，留最近 300 部 */
+    var PRKEY = "tg.prefs.v1", prefs = read(PRKEY, {});
+    function getPrefs(key) { return prefs[key] || {}; }
+    function setPrefs(key, patch) {
+        if (!key) { return; }
+        var p = prefs[key] || {};
+        Object.keys(patch).forEach(function (k) { p[k] = patch[k]; });
+        p.at = Date.now();
+        prefs[key] = p;
+        var keys = Object.keys(prefs);
+        if (keys.length > 300) {
+            keys.sort(function (a, b) { return prefs[a].at - prefs[b].at; });
+            keys.slice(0, keys.length - 300).forEach(function (k) { delete prefs[k]; });
+        }
+        write(PRKEY, prefs);
+    }
+
+    /* 当文件发的片子没有时长（Telegram 不知道），放过一次才知道：fileKey → 秒，留 500 个 */
+    var DKEY = "tg.dur.v1", durs = read(DKEY, {});
+    function dur(key) { return (durs[key] && durs[key].d) || 0; }
+    function setDur(key, d) {
+        if (!key || !d || dur(key) === Math.round(d)) { return; }
+        durs[key] = { d: Math.round(d), at: Date.now() };
+        var keys = Object.keys(durs);
+        if (keys.length > 500) {
+            keys.sort(function (a, b) { return durs[a].at - durs[b].at; });
+            keys.slice(0, keys.length - 500).forEach(function (k) { delete durs[k]; });
+        }
+        write(DKEY, durs);
+    }
+
+    /* 搜过的词（遥控器上打字慢，最便宜的搜索是已经打过的那个 —— bilibili 项目的经验），最近的在前，留 12 个 */
+    var QKEY = "tg.searches.v1";
+    function searches() { return read(QKEY, []); }
+    function addSearch(q) {
+        var list = searches().filter(function (x) { return x !== q; });
+        list.unshift(q);
+        write(QKEY, list.slice(0, 12));
+    }
+
     function lastSource() { return read(SKEY, null); }
     function setLastSource(src) { write(SKEY, { id: src.id, title: src.title, kind: src.kind, url: src.url }); }
 
@@ -105,7 +145,8 @@ var Store = (function () {
     }
 
     function getMoov(key) { return get("moov", key); }
-    function putMoov(key, m) { return put("moov", key, { start: m.start, bytes: m.bytes }, 12); }
+    /* MP4：{start, bytes}（moov 原样）；MKV：{mkv: info}（mkv.js 解析好的头 + Cues，结构化克隆存进去） */
+    function putMoov(key, m) { return put("moov", key, m.mkv ? { mkv: m.mkv } : { start: m.start, bytes: m.bytes }, 12); }
     /* 封面：电影海报（维基百科）或者从片子中间解出来的一帧。{bytes, kind: "poster" | "frame", mime, meta} */
     function getCover(key) { return get("cover", key); }
     function putCover(key, bytes, extra) {
@@ -114,5 +155,5 @@ var Store = (function () {
         return put("cover", key, v, 800);    // 缩略图 20–40KB，800 张 ~30MB
     }
 
-    return { setProgress: setProgress, getProgress: getProgress, srcCount: srcCount, setSrcCount: setSrcCount, noPoster: noPoster, markNoPoster: markNoPoster, noFrame: noFrame, markNoFrame: markNoFrame, lastSource: lastSource, setLastSource: setLastSource, webSources: webSources, setWebSources: setWebSources, webSourceGroups: webSourceGroups, getMoov: getMoov, putMoov: putMoov, getCover: getCover, putCover: putCover };
+    return { setProgress: setProgress, getProgress: getProgress, srcCount: srcCount, setSrcCount: setSrcCount, noPoster: noPoster, markNoPoster: markNoPoster, noFrame: noFrame, markNoFrame: markNoFrame, lastSource: lastSource, setLastSource: setLastSource, getPrefs: getPrefs, setPrefs: setPrefs, dur: dur, setDur: setDur, searches: searches, addSearch: addSearch, webSources: webSources, setWebSources: setWebSources, webSourceGroups: webSourceGroups, getMoov: getMoov, putMoov: putMoov, getCover: getCover, putCover: putCover };
 })();
