@@ -15,6 +15,8 @@
  */
 var Mkv = (function () {
     "use strict";
+    /* 显示给用户的话（i18n.js）；node 里的离线测试没有 I18n，原样用中文 */
+    var tx = typeof I18n !== "undefined" ? I18n.t : function (s) { var a = arguments; return String(s).replace(/\{(\d)\}/g, function (m, i) { return a[+i + 1]; }); };
 
     var CH = 512 * 1024;
     var EBML = 0x1A45DFA3, SEGMENT = 0x18538067, SEEKHEAD = 0x114D9B74, INFO = 0x1549A966, TRACKS = 0x1654AE6B,
@@ -122,11 +124,11 @@ var Mkv = (function () {
         var c = new Cache(read, fileSize);
         var b = await c.get(0, Math.min(fileSize, CH));
         var h = header(b, 0, b.length);
-        if (!h || h.id !== EBML) { throw new Error("不是 MKV（没有 EBML 头）"); }
+        if (!h || h.id !== EBML) { throw new Error(tx("不是 MKV（没有 EBML 头）")); }
         var docType = "matroska";
         each(b, h.hdr, h.hdr + h.size, function (id, s, e) { if (id === 0x4282) { docType = str(b, s, e); } });
         var o = h.hdr + h.size, sh = header(b, o, b.length);
-        if (!sh || sh.id !== SEGMENT) { throw new Error("MKV 里没有 Segment"); }
+        if (!sh || sh.id !== SEGMENT) { throw new Error(tx("MKV 里没有 Segment")); }
         var info = {
             docType: docType, segStart: o + sh.hdr, segEnd: 0, firstCluster: -1, timescale: 1000, tsNs: 1000000, duration: 0,
             tracks: [], cues: null
@@ -181,8 +183,8 @@ var Mkv = (function () {
             if (!more) { break; }
         }
         if (info.firstCluster < 0 && seeks[CLUSTER] !== undefined) { info.firstCluster = seeks[CLUSTER]; }
-        if (!rawTracks) { throw new Error("MKV 里没有 Tracks"); }
-        if (info.firstCluster < 0) { throw new Error("MKV 里找不到 Cluster"); }
+        if (!rawTracks) { throw new Error(tx("MKV 里没有 Tracks")); }
+        if (info.firstCluster < 0) { throw new Error(tx("MKV 里找不到 Cluster")); }
 
         info.timescale = Math.round(1e9 / info.tsNs);
         info.duration = rawDur > 0 ? rawDur * info.tsNs / 1e9 : 0;
@@ -256,8 +258,8 @@ var Mkv = (function () {
             t.outRate = Math.round(outRate || 0);
             if (!t.kind) { return; }
             describe(t);
-            if (enc) { t.unsupported = "加密的轨道放不了"; }
-            else if (t.comp && t.comp.algo !== 3 && t.kind !== "sub") { t.unsupported = "压缩过的" + (t.kind === "video" ? "视频" : "音频") + "轨放不了"; }
+            if (enc) { t.unsupported = tx("加密的轨道放不了"); }
+            else if (t.comp && t.comp.algo !== 3 && t.kind !== "sub") { t.unsupported = t.kind === "video" ? tx("压缩过的视频轨放不了") : tx("压缩过的音频轨放不了"); }
             out.push(t);
         });
         return out;
@@ -355,7 +357,7 @@ var Mkv = (function () {
                 vp9Entry(t);
                 if (!cp) { t.needFirstFrame = true; }      // 有第一帧就拿帧头里的 profile / 位深改写（scanFirstFrames / demuxer）
             } else {
-                t.unsupported = "视频格式 " + (id.replace(/^V_/, "") || "未知") + " 放不了";
+                t.unsupported = tx("视频格式 {0} 放不了", id.replace(/^V_/, "") || tx("未知"));
             }
             t.mime = t.codec ? "video/mp4; codecs=\"" + t.codec + "\"" : "";
         } else if (t.kind === "audio") {
@@ -380,17 +382,17 @@ var Mkv = (function () {
                 var tag = cp[0] | (cp[1] << 8);
                 if (tag === 0x55) { t.codec = "mp4a.6B"; t.stsd = audio("mp4a", t, esds(0x6B, null)); }
                 else if (tag === 0x2000) { t.codec = "ac-3"; t.needFirstFrame = true; t.codecId = "A_AC3"; }
-                else { t.unsupported = "音频格式 ACM 0x" + tag.toString(16) + " 放不了"; }
+                else { t.unsupported = tx("音频格式 {0} 放不了", "ACM 0x" + tag.toString(16)); }
             }
-            else if (/^A_DTS/.test(id)) { t.unsupported = "DTS 音轨电视放不了"; }
-            else if (id === "A_TRUEHD" || id === "A_MLP") { t.unsupported = "TrueHD 音轨电视放不了"; }
-            else if (id === "A_VORBIS") { t.unsupported = "Vorbis 音轨放不了"; }
-            else if (/^A_PCM/.test(id)) { t.unsupported = "PCM 音轨放不了"; }
-            else { t.unsupported = "音频格式 " + (id.replace(/^A_/, "") || "未知") + " 放不了"; }
+            else if (/^A_DTS/.test(id)) { t.unsupported = tx("DTS 音轨电视放不了"); }
+            else if (id === "A_TRUEHD" || id === "A_MLP") { t.unsupported = tx("TrueHD 音轨电视放不了"); }
+            else if (id === "A_VORBIS") { t.unsupported = tx("Vorbis 音轨放不了"); }
+            else if (/^A_PCM/.test(id)) { t.unsupported = tx("PCM 音轨放不了"); }
+            else { t.unsupported = tx("音频格式 {0} 放不了", id.replace(/^A_/, "") || tx("未知")); }
             t.mime = t.codec ? "audio/mp4; codecs=\"" + t.codec + "\"" : "";
         } else {
             if (!/^S_TEXT\/(UTF8|ASS|SSA|WEBVTT)$/.test(id) && id !== "S_HDMV/PGS") {
-                t.unsupported = id === "S_VOBSUB" ? "DVD 图形字幕（VobSub）放不了" : "字幕格式 " + id.replace(/^S_/, "") + " 放不了";
+                t.unsupported = id === "S_VOBSUB" ? tx("DVD 图形字幕（VobSub）放不了") : tx("字幕格式 {0} 放不了", id.replace(/^S_/, ""));
             }
         }
     }
@@ -413,7 +415,7 @@ var Mkv = (function () {
     }
     /* CodecPrivate = 「fLaC」+ 元数据块；dfLa 只放 STREAMINFO（标成最后一块，PICTURE 之类不要） */
     function flacEntry(t, cp) {
-        if (cp[0] !== 0x66 || cp[1] !== 0x4C || cp[2] !== 0x61 || cp[3] !== 0x43 || (cp[4] & 127) !== 0) { t.unsupported = "FLAC 头不对"; return; }
+        if (cp[0] !== 0x66 || cp[1] !== 0x4C || cp[2] !== 0x61 || cp[3] !== 0x43 || (cp[4] & 127) !== 0) { t.unsupported = tx("FLAC 头不对"); return; }
         var si = cp.slice(8, 42), br = new Bits(si, 80);
         t.rate = br.u(20); t.channels = br.u(3) + 1; t.bitDepth = br.u(5) + 1;
         var dfla = Mp4.full("dfLa", 0, 0, Mp4.concat([new Uint8Array([0x80, 0, 0, 34]), si]));

@@ -10,12 +10,12 @@
 <!-- 主页：左边来源，右边视频网格 -->
 <div id="home">
   <div id="rail">
-    <div id="brand">TG 视频</div>
+    <div id="brand" data-i18n>TG 视频</div>
     <div id="rail-wrap"><div id="rail-list"></div></div>
   </div>
   <div id="dim"></div>
   <div id="main">
-    <div id="head"><div id="src-title"></div><div id="src-sub"></div><div id="src-hint">← 换群</div></div>
+    <div id="head"><div id="src-title"></div><div id="src-sub"></div><div id="src-hint" data-i18n>← 换群</div></div>
     <div id="grid-wrap"><div id="grid"></div></div>
     <div id="empty"></div>
   </div>
@@ -33,33 +33,33 @@
   <div id="ov">
     <div id="ov-title"></div>
     <div id="ov-bar"><div id="ov-buf"></div><div id="ov-fill"></div><div id="ov-dot"></div></div>
-    <div id="ov-row"><span id="ov-time"></span><span id="ov-keys">确认 暂停 · 长按确认 音轨 / 字幕 · ←→ ↑↓ 快进快退（按住越来越快）· 返回 回列表</span></div>
+    <div id="ov-row"><span id="ov-time"></span><span id="ov-keys" data-i18n>确认 暂停 · 长按确认 音轨 / 字幕 · ←→ ↑↓ 快进快退（按住越来越快）· 返回 回列表</span></div>
   </div>
   <div id="perr"></div>
   <!-- 长按确认键：音轨、字幕、字幕时间、下一集 -->
-  <div id="menu"><div id="menu-wrap"><div id="menu-list"></div></div><div id="menu-foot">↑↓ 选 · 确认 · ←→ 调字幕时间 · 返回 关掉</div></div>
+  <div id="menu"><div id="menu-wrap"><div id="menu-list"></div></div><div id="menu-foot" data-i18n>↑↓ 选 · 确认 · ←→ 调字幕时间 · 返回 关掉</div></div>
   <!-- 放完了、有下一集 -->
-  <div id="upnext"><div class="h">接着放下一集</div><div class="t" id="upnext-t"></div><div class="k" id="upnext-k"></div></div>
+  <div id="upnext"><div class="h" data-i18n>接着放下一集</div><div class="t" id="upnext-t"></div><div class="k" id="upnext-k"></div></div>
 </div>
 
 <!-- 登录 -->
 <div id="panel">
   <div id="how">
-    <div style="font-size:56px;margin-bottom:30px">登录 Telegram</div>
-    手机打开 Telegram →<br><b>设置 → 设备 → 关联桌面设备</b><br>扫右边这个码
+    <div style="font-size:56px;margin-bottom:30px" data-i18n>登录 Telegram</div>
+    <div data-i18n>手机打开 Telegram →<br><b>设置 → 设备 → 关联桌面设备</b><br>扫右边这个码</div>
     <div id="qrstate"></div>
   </div>
   <div id="qr"></div>
-  <div id="pwbox">这个账号开了两步验证，输入密码后按确认：<br><input id="pw" type="password"></div>
+  <div id="pwbox"><span data-i18n>这个账号开了两步验证，输入密码后按确认：</span><br><input id="pw" type="password"></div>
 </div>
 
 <!-- 网页登录（有的站的列表要登录） -->
 <div id="wl">
   <div class="box">
-    <div class="h">登录 <span id="wl-site"></span></div>
-    <div class="sub">登录一次，查到你的账号编号，之后直接读公开的页面，不用再登录。<br>用遥控器输入，输完按屏幕键盘上的「完成」。密码不保存。按返回键取消。</div>
-    <div class="lab">账号</div><input id="wl-user" type="text" autocomplete="off">
-    <div class="lab">密码</div><input id="wl-pass" type="password">
+    <div class="h"><span data-i18n>登录</span> <span id="wl-site"></span></div>
+    <div class="sub" data-i18n>登录一次，查到你的账号编号，之后直接读公开的页面，不用再登录。<br>用遥控器输入，输完按屏幕键盘上的「完成」。密码不保存。按返回键取消。</div>
+    <div class="lab" data-i18n>账号</div><input id="wl-user" type="text" autocomplete="off">
+    <div class="lab" data-i18n>密码</div><input id="wl-pass" type="password">
     <div id="wl-msg"></div>
   </div>
 </div>
@@ -67,10 +67,10 @@
 <!-- 搜索 -->
 <div id="sx">
   <div class="box">
-    <div class="h">搜索</div>
-    <div class="sub">在你所有的群和频道里找视频：片名、说明文字、文件名都算。<br>用遥控器输入，输完按屏幕键盘上的「完成」。按返回键取消。</div>
+    <div class="h" data-i18n>搜索</div>
+    <div class="sub" data-i18n>在你所有的群和频道里找视频：片名、说明文字、文件名都算。<br>用遥控器输入，输完按屏幕键盘上的「完成」。按返回键取消。</div>
     <input id="sx-q" type="text" autocomplete="off">
-    <div class="lab" id="sx-lab">最近搜过（按 ↓ 选）</div>
+    <div class="lab" id="sx-lab" data-i18n>最近搜过（按 ↓ 选）</div>
     <div id="sx-recent"></div>
   </div>
 </div>
@@ -80,6 +80,7 @@
 
 <script src="js/config.js"></script>
 <script src="js/log.js"></script>
+<script src="js/i18n.js"></script>
 <script src="js/tg.bundle.js"></script>
 <script src="js/mp4.js"></script>
 <script src="js/mkv.js"></script>

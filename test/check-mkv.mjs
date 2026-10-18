@@ -20,6 +20,8 @@
  *   mkvmerge -o k_hevc.mkv $M/c_hevc.mp4
  *   mkvmerge -o k_multi.mkv --language 1:zh --track-name 1:国语 --default-track-flag 1:yes m_multi.mkv
  *   mkvmerge -o k_zlibsub.mkv --compression 3:zlib --compression 4:zlib m_multi.mkv          字幕 zlib 压缩
+ *   ffmpeg -i m_h264_aac.mkv -i ../subs/pgs.sup -map 0 -map 1 -c copy -metadata:s:s:0 language=chi \
+ *     -metadata:s:s:0 title=简体（图形） m_pgs.mkv                                             PGS 字幕（pgs.sup 是 test/check-subs.mjs 生成的）
  *   header stripping：mkvmerge v102 已经不真做了（analyze_header_removal 只写一个空的 ContentEncoding，ffmpeg 读它反而读坏），
  *   测试末尾自己合成一个（k_ac3_lace.mkv 的 AC-3 每帧去掉 0B 77、ContentCompAlgo 3），见 synthStripped。
  *   mkvmerge -o k_blockgroup.mkv --disable-lacing $M/a_h264_fast.mp4
@@ -242,7 +244,9 @@ for (const file of process.argv.slice(2)) {
         const s0 = mine[0];
         let text = s0 ? (s0.zlib ? zlib.inflateSync(Buffer.from(s0.data)).toString() : Buffer.from(s0.data).toString()) : '';
         console.log(`    字幕 #${n} ${t.codecId} ${mine.length} 条，第一条 ${s0 && s0.pts}s 长 ${s0 && s0.dur}s zlib=${s0 && s0.zlib}：${JSON.stringify(text.slice(0, 50))}`);
-        if (!/第一句/.test(text)) fail('字幕内容不对');
+        /* PGS（m_pgs.mkv）：块是段，第一个段是 PCS（0x16）；内容对不对由 test/check-subs.mjs 和 ffmpeg 的渲染比 */
+        if (/PGS/.test(t.codecId)) { if (!s0 || s0.data[0] !== 0x16) fail('PGS 第一块不是 PCS 段'); }
+        else if (!/第一句/.test(text)) fail('字幕内容不对');
       }
     }
 

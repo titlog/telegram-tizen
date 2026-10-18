@@ -158,7 +158,9 @@ const sleep = (t) => new Promise(r => setTimeout(r, t));
 const ev = (type, c) => page.evaluate(([t, c]) => document.dispatchEvent(new KeyboardEvent(t, { keyCode: c, bubbles: true })), [type, c]);
 const key = async (code, n = 1) => { for (let i = 0; i < n; i++) { await ev('keydown', code); await sleep(40); await ev('keyup', code); await sleep(80); } };
 const hold = async (code, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { await ev('keydown', code); await sleep(100); } await ev('keyup', code); await sleep(200); };
-const shot = async (name) => { await page.screenshot({ path: `${ROOT}logs/ui-${name}.png` }); console.log('  截图 ' + name); };
+/* UILANG=en：英文界面（截图名前面加 en-）。不给就钉成中文 —— Playwright 的 Chromium 系统语言是 en-US，新装的会跟着变英文 */
+const UILANG = process.env.UILANG || 'zh', L = (zh, en) => UILANG === 'en' ? en : zh;
+const shot = async (name) => { await page.screenshot({ path: `${ROOT}logs/ui-${UILANG === 'en' ? 'en-' : ''}${name}.png` }); console.log('  截图 ' + name); };
 
 const vt = () => page.evaluate(() => document.getElementById('v').currentTime);
 const txt = (sel) => page.evaluate(s => { const e = document.querySelector(s); return e ? e.textContent.replace(/\s+/g, ' ').trim() : null; }, sel);
@@ -183,7 +185,7 @@ const subsSeen = async (ms) => { const seen = new Set(); const t0 = Date.now();
   return [...seen].join(' / ') || '（没有）'; };
 
 await page.goto('http://localhost:8768/app/index.html');
-await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
+await page.evaluate((l) => { try { localStorage.clear(); localStorage.setItem('tg.lang.v1', l); } catch (e) {} }, UILANG);
 await page.reload();
 await sleep(1500);
 await shot('1-home');
@@ -273,16 +275,16 @@ console.log(`  换音轨：${t1.toFixed(1)} → 重开后 ${t2.toFixed(1)}（应
 await hold(13, 900); await sleep(300);
 console.log('  换完再开菜单：\n    ' + (await menuRows()).join('\n    '));
 /* 片子里的中文字幕：菜单里「字幕」下面第二行 */
-await goto(r => r.includes('片子里')); await key(13); await sleep(2500);      // zh.srt 第三条从 10 秒开始
+await goto(r => r.includes(L('片子里', 'in the file'))); await key(13); await sleep(2500);      // zh.srt 第三条从 10 秒开始
 console.log('  内嵌字幕 t=' + (await vt()).toFixed(1) + '：' + await txt('#sub'));
 await shot('22-sub-emb');
 await hold(13, 900); await sleep(300);
-await goto(r => r.includes('群里的文件')); await key(13); await sleep(1500);
+await goto(r => r.includes(L('群里的文件', 'file in the group'))); await key(13); await sleep(1500);
 console.log('  外挂字幕（GBK）t=' + (await vt()).toFixed(1) + '：' + await txt('#sub'));
 await shot('23-sub-file');
 await hold(13, 900); await sleep(300);
-await goto(r => r.includes('秒 →')); await key(39, 2); await sleep(300);
-console.log('  字幕时间：' + (await menuRows()).filter(r => r.includes('秒')).join(''));
+await goto(r => r.trim().endsWith('→')); await key(39, 2); await sleep(300);
+console.log('  字幕时间：' + (await menuRows()).filter(r => r.trim().endsWith('→')).join(''));
 await shot('24-offset');
 await key(10009); await sleep(300);
 await key(13); await sleep(600);
@@ -320,7 +322,7 @@ if (extra.some(x => x.path.startsWith('mkv/'))) {
     if (/m_multi/.test(title)) {
       await hold(13, 900); await sleep(300);
       console.log('  m_multi 的菜单：' + (await menuRows()).join(' | '));
-      await goto(r => r.includes('英语') && r.includes('片子里')); await key(13);
+      await goto(r => r.includes(L('英语', 'English')) && r.includes(L('片子里', 'in the file'))); await key(13);
       extraInfo = '，选英语 ASS 之后 8 秒里出现过的字幕：' + await subsSeen(8000);
     }
     if (/m_pgs/.test(title)) {

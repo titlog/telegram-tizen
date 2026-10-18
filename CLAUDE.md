@@ -11,6 +11,7 @@ app/js/tg.js      Telegram 这一层：来源（群/频道）、来源里的视�
 app/js/player.js  播放引擎：MediaSource + 音视频两个 SourceBuffer，按样本在文件里的位置顺序读、拼 ~1 秒一段；MKV 走 mkv.js 拆块
 app/js/mp4.js     自己写的渐进式 MP4 → fMP4：样本表 TypedArray、二分找关键帧、拼 moof+mdat（替掉了 mp4box）；也认 tx3g 字幕轨
 app/js/mkv.js     自己写的 MKV / WebM：读头和 Cues、按 Cluster 顺序拆块、算解码时间，交给 Mp4.fragmentFrames
+app/js/i18n.js    界面语言：中文原句当键查英文（T("…")），跟系统语言、来源栏最下面切换
 app/js/subs.js    字幕：外挂文件（SRT/ASS/VTT，GBK/Big5 自动认）、tx3g、MKV 的文字和 PGS 图形字幕、画到屏幕上
 app/js/web.js     网页链接：按站点规则解析出视频地址（XHR，不行就隐藏框）、hls.js 放（vendor/hls.min.js）；列表页当来源、翻页、登录查账号编号
 app/js/sites.local.js  站点规则（Web.register），本机自己写，不进仓库
@@ -21,6 +22,7 @@ tools/collect.mjs 日志收集，:8097（抖音 :8098、bilibili :8099）
 test/check.mjs    mp4.js 离线校验（对照 ffprobe，拼出来的 fMP4 交给 ffmpeg 解码）
 test/check-mkv.mjs  mkv.js 离线校验（测试片 test/media/mkv/，生成命令在文件头；要 ffmpeg + mkvtoolnix）
 test/check-subs.mjs subs.js 校验（编码、格式、tx3g、MKV 块；PGS 和 ffmpeg 的渲染逐像素比）
+test/i18n.mjs     界面每句话都有英文、占位符对得上；app.js 里往屏幕上写的地方没有漏套 T
 test/run.mjs      播放引擎桌面测试（Playwright + test/serve.mjs 限速模拟电视）
 test/web.mjs      网页链接那条路：真网站解析 → hls.js 放 → 跳转（NOXHR=1 走隐藏框）
 test/weblist.mjs  网页列表：真网站取第一页再翻两页；要登录的列表应报 needLogin
@@ -37,6 +39,7 @@ zsh tools/deploy.sh                              # 终端 2
 node test/check.mjs test/media/*.mp4             # 改 mp4.js 之后（测试片用 ffmpeg 生成，见 test/check.mjs 头）
 node test/check-mkv.mjs test/media/mkv/*.mkv test/media/mkv/*.webm   # 改 mkv.js 之后
 node test/check-subs.mjs                         # 改 subs.js 之后
+node test/i18n.mjs                               # 改了界面上的字之后
 node test/serve.mjs & node test/run.mjs media/a_h264_fast.mp4 "media/b_h264_moovend.mp4?start=30"   # 改 player.js 之后
 node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv 只跑最后 MKV 那段）
 ```
@@ -221,4 +224,20 @@ PGS 一个显示集几 KB 到几十 KB、蓝光 remux 常带四五条：定下�
 下一集倒计时；还有之前那条 —— 切到别的应用一分钟以上再回来、后台线程重连。10-18 13:32 装上，用户 13:46 说「都试了都没问题」；
 但那段日志里只有一次 MP4 播放（3.7GB、6.6 秒出画面），MKV、换音轨、选字幕、搜索、下一集都会写日志，一条都没有 —— **当作还没验证**，
 下次在电视上看到这几样的日志再划掉。
+
+## 中英双语界面（2026-10-18）
+
+开源之后用户说「Telegram 老外也用的很多」，先补了完整的 README.en.md，接着界面也做成双语。
+- **写法**：界面上的字照旧写中文、套 `T("…")`（app.js）/ `tx("…")`（player / mkv / mp4 / tg / web —— player.js 和 mkv.js 里 `T` 已经是轨道变量名）。
+  中文原句就是键，英文字典在 i18n.js；查不到就显示中文，不会空着。带变量用 `{0}`。日志（`R(...)`）不翻。index.html 里的静态文字标 `data-i18n`，
+  启动时 `I18n.apply()` 换掉。`test/i18n.mjs` 卡住漏翻、占位符不一致、app.js 里直接往屏幕上写中文。
+- **选哪种**：手动选过的（`tg.lang.v1`）→ 系统语言是 zh 开头就中文、别的英文。**升级前就在用的电视定成中文**（本地有看过的记录 / 上次的来源）：
+  用户的电视系统语言不一定是中文，升级之后突然变英文不对。启动那行日志写着界面语言、为什么、系统语言是什么（电视上 `navigator.language` 跟不跟
+  系统菜单语言走还没验证）。来源栏最下面一项切换（写成要换成的那种语言：英文界面上是「中文界面」），切完重新加载页面。
+- **跟语言走的行为**：自动开字幕的规则换成「对白不是界面语言、又有界面语言的字幕才开」—— 英文界面上中文对白的片子自动开英文字幕。
+- 桌面测试：`ui-emu.mjs` 中英各跑一遍（`UILANG=en`）。踩了一下：旧测试里有一步在来源栏按三下 ↓ 再确认，原来落在「退出登录」（只会提示「再按一次」），
+  换语言那一项插在它前面之后，测试跑到一半把语言切了 —— 换语言放到「退出登录」下面、最后一项。
+- README.en.md 的截图是英文界面（`UILANG=en node test/readme-shots.mjs` → `docs/screenshots/en-*.jpg`）。
+- 电视上（10-18 14:17）：系统语言报的是 `en-GB`，按「升级前就在用」定成了中文 —— 没有这条，用户这台升级后就是英文界面。
+  用户说切换试过没问题，但日志里没有「界面语言 zh → en」那一行，**切换这一步当作还没在电视上验证**。
 

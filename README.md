@@ -1,6 +1,6 @@
 # 三星电视上放 Telegram 里的视频
 
-**中文 · [English](#english)**
+**中文 · [English](README.en.md)**
 
 给三星 Tizen 电视做的 Telegram 视频播放器：扫码登录，左边是有视频的群和频道，右边是视频网格，遥控器选了就放。
 边下边播，几个 GB 的长片也是几秒出画面、随便跳。电视直连 Telegram：**没有服务器，会话只存在电视本机。**
@@ -38,6 +38,7 @@
 - **网页链接**：群里发的 `.m3u8` / `.mp4` 链接直接放。别的网站要一条站点规则 —— 仓库里**一条都不带**，
   自己写在 `app/js/sites.local.js` 里（不进仓库），格式见 [`app/js/web.js`](app/js/web.js) 开头。
 - 切到别的应用再回来，自动重连。
+- **中英双语界面**：跟电视的系统语言走（系统是中文就中文，别的都英文），来源栏最下面可以切换。
 
 ## 我的电视能装吗
 
@@ -80,17 +81,22 @@ node tools/collect.mjs       # 终端 1：在 8097 端口收电视上报的日�
 zsh tools/deploy.sh          # 终端 2
 ```
 
-桌面上的测试在 `test/`：`check.mjs` 对照 ffprobe 校验 MP4 解析，`run.mjs` 测播放引擎，`ui-emu.mjs` 用假数据把界面走一遍并截图，
-`readme-shots.mjs` 重拍 README 里的截图。
-它们要 Playwright 和 ffmpeg，测试片自己用 ffmpeg 生成（见各文件开头）。全部测量、坑和调试方法在 [`CLAUDE.md`](CLAUDE.md)。
+桌面上的测试在 `test/`：`check.mjs` 对照 ffprobe 校验 MP4 解析，`check-mkv.mjs` 逐帧校验 MKV 解析，`check-subs.mjs` 校验字幕
+（PGS 和 ffmpeg 的渲染逐像素比），`run.mjs` 测播放引擎，`ui-emu.mjs` 用假数据把界面走一遍并截图，`readme-shots.mjs` 重拍 README 里的截图，`i18n.mjs` 检查界面上每句话都有英文（`ui-emu.mjs`、`readme-shots.mjs` 加 `UILANG=en` 跑英文界面）。
+它们要 Playwright 和 ffmpeg（MKV 那套还要 mkvtoolnix），测试片自己生成（见各文件开头）。全部测量、坑和调试方法在 [`CLAUDE.md`](CLAUDE.md)。
 
 ## 目录
 
 ```
 app/          客户端（ES5，没有构建步骤；mtcute 打成 js/tg.bundle.js，deploy.sh 现打）
-  js/tg.js       Telegram 这一层：来源、视频、封面、给播放器的数据源
-  js/mp4.js      渐进式 MP4 → fMP4
+  js/app.js      界面和遥控器：登录、网格、播放器、菜单、下一集、搜索
+  js/i18n.js     界面语言：中文 / 英文
+  js/tg.js       Telegram 这一层：来源、视频（当视频发的和当文件发的）、搜索、字幕文件、给播放器的数据源
   js/player.js   MSE 播放引擎
+  js/mp4.js      渐进式 MP4 → fMP4
+  js/mkv.js      MKV / WebM → fMP4
+  js/subs.js     字幕：文件、片子里的文字字幕、PGS、画到屏幕上
+  js/cover.js    封面：解一帧、维基百科海报
   js/web.js      网页链接（框架，站点规则另写）
 build/        mtcute 的打包入口（后台线程 + 主线程两份）
 spike/        可行性探测和引擎测量脚本，不进包
@@ -104,33 +110,3 @@ CLAUDE.md     全部发现、坑，以及怎么在零售机上调试
 MIT。`app/js/vendor/hls.min.js`（hls.js）是 Apache-2.0；打包时进来的 mtcute、qrcode-generator 是 MIT。
 见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。Telegram 是其所有者的商标，本项目与之无关联。
 
----
-
-## English
-
-A player for the videos in your Telegram groups and channels, on Samsung Tizen TVs. Sign in with a QR code; your
-groups and channels with videos are on the left, a grid of their videos on the right, and the remote plays them.
-It streams while downloading, so a multi-gigabyte film starts in seconds and seeks freely. The TV talks to
-Telegram directly — no server; the session stays on the set. (The screenshots use made-up group names; the
-videos are Blender open movies — [Sintel](https://durian.blender.org/) (its trailer is the one playing), Big Buck Bunny,
-Elephants Dream, Tears of Steel, Spring, Sprite Fright, Charge, Coffee Run and Caminandes 3 — © Blender Foundation /
-Blender Studio, CC BY 2.5–4.0; per-film credits are in `test/readme-shots.mjs`.)
-
-- QR sign-in with [mtcute](https://github.com/mtcute/mtcute), running in a worker.
-- Hand-written MP4 and MKV parsers feeding MSE: a 2.6 GB film starts in 5.8 s, seeks to unbuffered positions in 0.6 s.
-  Videos sent as files (MKV, uncompressed MP4) show up too. MKV: H.264 / HEVC / VP9 / AV1 with AAC / AC-3 / E-AC-3 /
-  Opus / FLAC (the TV cannot decode DTS or TrueHD).
-- Hold OK while playing for a menu: switch audio tracks, turn on subtitles (embedded mov_text, SRT / ASS / PGS in MKV,
-  or an `.srt` / `.ass` file posted in the same group — GBK and Big5 are detected), shift subtitle timing.
-- Series play the next episode automatically; search across all your groups and channels from the top of the source list.
-- Covers: a frame from the middle when the thumbnail is black, Wikipedia posters for films.
-- Web links: `.m3u8` / `.mp4` links posted in a group play directly. Other sites need a site rule, which you write
-  yourself in `app/js/sites.local.js` (not in the repository); the format is at the top of `app/js/web.js`.
-  The repository ships no site rules.
-
-Tested on a 2023 Samsung CU7090 (Tizen 9.0). Install from source: set up the TV and the Samsung certificate with
-[bilibili-tizen](https://github.com/titlog/bilibili-tizen)'s `tools/setup.sh`, put your own API ID and hash from
-my.telegram.org in `~/.telegram-tizen.conf`, then run `zsh tools/deploy.sh` here.
-
-MIT. hls.js is Apache-2.0; mtcute and qrcode-generator (bundled at build time) are MIT.
-Not affiliated with Telegram or Samsung.

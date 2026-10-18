@@ -39,6 +39,8 @@ var Player = (function () {
     function mb(n) { return (n / 1048576).toFixed(1) + "MB"; }
     function sleep(t) { return new Promise(function (r) { setTimeout(r, t); }); }
     function errStr(e) { return (e && (e.message || e.text || e.name)) || String(e); }
+    /* 显示给用户的话（i18n.js）；node 里的离线测试没有 I18n，原样用中文 */
+    var tx = typeof I18n !== "undefined" ? I18n.t : function (s) { var a = arguments; return String(s).replace(/\{(\d)\}/g, function (m, i) { return a[+i + 1]; }); };
 
     /* 下载来的字节：按文件偏移排好的一串块。每次换读的位置就清空。 */
     function Win() { this.chunks = []; this.startOff = 0; this.endOff = 0; this.total = 0; }
@@ -85,7 +87,7 @@ var Player = (function () {
                 if (pos >= off + size) { break; }
             }
         } finally { ac.abort(); }
-        if (pos < off + size) { throw new Error("没读够（" + pos + "/" + (off + size) + "）"); }
+        if (pos < off + size) { throw new Error(tx("没读够（{0}/{1}）", pos, off + size)); }
         return out;
     }
 
@@ -152,7 +154,7 @@ var Player = (function () {
             if (!S || S.dead) { return; }
             S.dead = true;
             var e = video.error;
-            var msg = "播放器出错 code=" + (e ? e.code : "?") + " " + (e && e.message ? e.message : "") + " @" + video.currentTime.toFixed(2);
+            var msg = tx("播放器出错") + " code=" + (e ? e.code : "?") + " " + (e && e.message ? e.message : "") + " @" + video.currentTime.toFixed(2);
             R(msg);
             S.lanes.forEach(stopLane);
             S.tracks.forEach(function (T) { T.q.length = 0; });
@@ -401,21 +403,21 @@ var Player = (function () {
                             return atHead;
                         }
                         if (h.type === "mdat" || h.size === Infinity) {
-                            if (h.size === Infinity) { reject(new Error("mdat 一直到文件尾，没有 moov")); return false; }
+                            if (h.size === Infinity) { reject(new Error(tx("mdat 一直到文件尾，没有 moov"))); return false; }
                             sess.sawMdat = true;
                             pos = h.start + h.size;
                             R("moov 不在开头，跳到 " + mb(pos) + " 去读");
                             startStream(main, pos, step);
                             return false;
                         }
-                        if (h.type === "moof") { reject(new Error("已经是分段 MP4（fragmented），还不支持")); return false; }
+                        if (h.type === "moof") { reject(new Error(tx("已经是分段 MP4（fragmented），还不支持"))); return false; }
                         /* 开头就不像盒子（AVI 的 RIFF、TS 的 0x47…）：别顺着乱七八糟的「大小」一路跳到文件尾 */
                         if (pos === 0 && (h.size < 8 || h.size > sess.source.size || !/^[\x20-\x7e]{4}$/.test(h.type))) {
-                            reject(new Error("不认识的文件格式（不是 MP4 也不是 MKV）"));
+                            reject(new Error(tx("不认识的文件格式（不是 MP4 也不是 MKV）")));
                             return false;
                         }
                         pos = h.start + h.size;
-                        if (pos >= sess.source.size) { reject(new Error("读到文件尾也没找到 moov")); return false; }
+                        if (pos >= sess.source.size) { reject(new Error(tx("读到文件尾也没找到 moov"))); return false; }
                     }
                 }
                 main.onChunk = step;
@@ -475,7 +477,7 @@ var Player = (function () {
                     });
                 }, { once: true });
                 sess.url = URL.createObjectURL(sess.ms);
-                video.onerror = function () { if (S === sess) { fatal(); reject(new Error("播放器出错")); } };
+                video.onerror = function () { if (S === sess) { fatal(); reject(new Error(tx("播放器出错"))); } };
                 video.src = sess.url;
             });
         };
@@ -500,18 +502,18 @@ var Player = (function () {
             sess.duration = mv.duration;
             mv.tracks.forEach(function (tr) {
                 var ok = !tr.unsupported && MediaSource.isTypeSupported(tr.mime);
-                if (tr.kind === "video" && !v) { if (ok) { v = tr; } else { notes.push("视频 " + (tr.unsupported || tr.codec) + " 放不了"); } }
+                if (tr.kind === "video" && !v) { if (ok) { v = tr; } else { notes.push(tr.unsupported ? tx(tr.unsupported) : tx("视频 {0} 放不了", tr.codec)); } }
             });
-            if (!v) { throw new Error(notes.join("；") || "没有视频轨"); }
+            if (!v) { throw new Error(notes.join(tx("；")) || tx("没有视频轨")); }
             /* 音轨：tkhd 里 enabled 的那条是默认（多音轨的 MP4 只开一条） */
             sess.audios = mv.tracks.filter(function (tr) { return tr.kind === "audio"; }).map(function (tr) {
                 var ok = !tr.unsupported && MediaSource.isTypeSupported(tr.mime);
                 return { key: "a:" + tr.id, tr: tr, lang: tr.lang, name: tr.name, codec: tr.codec, channels: tr.channels, ok: ok,
-                         why: ok ? "" : (tr.unsupported || tr.codec + " 电视放不了"), isDefault: tr.enabled };
+                         why: ok ? "" : tr.unsupported ? tx(tr.unsupported) : tx("{0} 电视放不了", tr.codec), isDefault: tr.enabled };
             });
             var pick = pickAudio(sess.audios, opts.audio), a = pick ? pick.tr : null;
             sess.audioKey = pick ? pick.key : "";
-            if (!a && sess.audios.length) { notes.push("音频 " + sess.audios.map(function (x) { return x.why; }).join("、") + "，没声音"); }
+            if (!a && sess.audios.length) { notes.push(tx("没有能放的音轨（{0}），没声音", sess.audios.map(function (x) { return x.why; }).join(tx("、")))); }
             addTrack(sess, v, VID);
             if (a) { addTrack(sess, a, AID); }
             /* 片子里的字幕轨（tx3g / wvtt） */
@@ -529,7 +531,7 @@ var Player = (function () {
               (a ? a.codec + " " + a.channels + "ch " + a.rate + "Hz" : "无音频") + (sess.audios.length > 1 ? "（" + sess.audios.length + " 条音轨，用 " + sess.audioKey + "）" : "") +
               (sess.subT.length ? "，字幕轨 " + sess.subT.map(function (s) { return s.tr.codec + (s.tr.lang ? "/" + s.tr.lang : ""); }).join(" ") : "") +
               "，" + Math.round(mv.duration / 60) + " 分" + (notes.length ? " | " + notes.join("；") : ""));
-            if (notes.length) { state("note", notes.join("；")); }
+            if (notes.length) { state("note", notes.join(tx("；"))); }
             subsUpfront(sess);
             if (a) {
                 /* 同一时刻的音视频在文件里各在哪：隔得远的文件，跳转要读很多用不上的字节 */
@@ -640,17 +642,17 @@ var Player = (function () {
             sess.duration = info.duration;
             info.tracks.forEach(function (t) {
                 if (t.kind !== "video" || v) { return; }
-                if (!t.unsupported && MediaSource.isTypeSupported(t.mime)) { v = t; } else { notes.push("视频 " + (t.unsupported || t.codec || t.codecId) + " 放不了"); }
+                if (!t.unsupported && MediaSource.isTypeSupported(t.mime)) { v = t; } else { notes.push(t.unsupported ? tx(t.unsupported) : tx("视频 {0} 放不了", t.codec || t.codecId)); }
             });
-            if (!v) { throw new Error(notes.join("；") || "没有视频轨"); }
+            if (!v) { throw new Error(notes.join(tx("；")) || tx("没有视频轨")); }
             sess.audios = info.tracks.filter(function (t) { return t.kind === "audio"; }).map(function (t) {
                 var ok = !t.unsupported && !!t.mime && MediaSource.isTypeSupported(t.mime);
                 return { key: "a:" + t.num, mk: t, lang: t.lang, name: t.name, codec: t.codec || t.codecId, channels: t.channels, ok: ok,
-                         why: ok ? "" : (t.unsupported || (t.codec || t.codecId) + " 电视放不了"), isDefault: t.isDefault };
+                         why: ok ? "" : t.unsupported ? tx(t.unsupported) : tx("{0} 电视放不了", t.codec || t.codecId), isDefault: t.isDefault };
             });
             var pick = pickAudio(sess.audios, opts.audio), a = pick ? pick.mk : null;
             sess.audioKey = pick ? pick.key : "";
-            if (!a && sess.audios.length) { notes.push("音频 " + sess.audios.map(function (x) { return x.why; }).join("、") + "，没声音"); }
+            if (!a && sess.audios.length) { notes.push(tx("没有能放的音轨（{0}），没声音", sess.audios.map(function (x) { return x.why; }).join(tx("、")))); }
             sess.subsInfo = info.tracks.filter(function (t) { return t.kind === "sub" && !t.unsupported; });
             function trOf(t) { return { kind: t.kind, timescale: info.timescale, stsd: t.stsd, width: t.width, height: t.height, codec: t.codec, mime: t.mime }; }
             var V = addTrack(sess, trOf(v), VID), A = a ? addTrack(sess, trOf(a), AID) : null;
@@ -672,7 +674,7 @@ var Player = (function () {
               (sess.subsInfo.length ? "，字幕轨 " + sess.subsInfo.map(function (t) { return t.codecId + (t.lang ? "/" + t.lang : ""); }).join(" ") : "") +
               "，" + Math.round(info.duration / 60) + " 分，Cues " + (info.cues ? info.cues.t.length + " 个" : "没有") +
               (notes.length ? " | " + notes.join("；") : ""));
-            if (notes.length) { state("note", notes.join("；")); }
+            if (notes.length) { state("note", notes.join(tx("；"))); }
             if (startAt > 1) { repositionMkv(sess, cueOrGuess(sess, startAt, 0), "续播", opts.exact ? startAt : 0); }
             else { repositionMkv(sess, { t: 0, pos: info.firstCluster }, "从头"); }
         }
@@ -721,7 +723,7 @@ var Player = (function () {
                 if (performance.now() - sess.t0 > 90000) {
                     clearInterval(tick);
                     R("90 秒没出画面，放弃");
-                    state("error", "90 秒没出画面");
+                    state("error", tx("90 秒没出画面"));
                     reject(new Error("timeout"));
                 }
             }, 20);

@@ -17,6 +17,7 @@
         playing: null, pending: null, pendTimer: 0, ovTimer: 0, backAt: 0, logoutAt: 0
     };
     function R(s) { Log.report("app", s); }
+    I18n.apply();
     function errStr(e) { return (e && (e.message || e.text || e.name)) || String(e); }
 
     try {
@@ -33,11 +34,7 @@
         return (h ? h + ":" + (m < 10 ? "0" : "") : "") + m + ":" + (x < 10 ? "0" : "") + x;
     }
     function fmtSize(b) { return b >= 1073741824 ? (b / 1073741824).toFixed(1) + " GB" : Math.round(b / 1048576) + " MB"; }
-    function fmtDate(d) {
-        if (!d) { return ""; }
-        var now = new Date();
-        return (d.getFullYear() !== now.getFullYear() ? d.getFullYear() + "年" : "") + (d.getMonth() + 1) + "月" + d.getDate() + "日";
-    }
+    function fmtDate(d) { return I18n.date(d); }
     function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]; }); }
 
     var toastTimer = 0;
@@ -59,12 +56,12 @@
             R("连不上 Telegram：" + errStr(e));
             $("home").classList.add("hide");
             $("panel").classList.add("on");
-            $("how").innerHTML = "<div style='font-size:48px'>连不上 Telegram</div><div style='font-size:30px;color:#999;margin-top:20px'>" +
-                esc(errStr(e)) + "<br>检查网络后按确认重试</div>";
+            $("how").innerHTML = "<div style='font-size:48px'>" + T("连不上 Telegram") + "</div><div style='font-size:30px;color:#999;margin-top:20px'>" +
+                esc(errStr(e)) + "<br>" + T("检查网络后按确认重试") + "</div>";
             S.screen = "bootfail";
             return;
         }
-        R("连上 Telegram " + Math.round(performance.now() - t0) + "ms，mtcute 在 " + TG.mode());
+        R("连上 Telegram " + Math.round(performance.now() - t0) + "ms，mtcute 在 " + TG.mode() + "；界面 " + I18n.lang + "（" + I18n.why + "，系统语言 " + I18n.sys + "）");
         var me = await TG.me();
         if (!me) { await login(); }
         S.screen = "home";
@@ -78,7 +75,7 @@
             await openSource(last, { quiet: true });
             R("启动到主页 " + Math.round(performance.now() - t0) + "ms，来源「" + S.src.title + "」" + S.items.length + " 个视频");
         } else {
-            $("empty").innerHTML = "正在找有视频的群和频道…";
+            $("empty").innerHTML = T("正在找有视频的群和频道…");
         }
         loadSources(!last);
     }
@@ -138,7 +135,7 @@
           (before && before !== after ? "，列表变了" : ""));
         if (openFirst && !S.src) {
             $("src-sub").textContent = "";
-            $("empty").innerHTML = "还没有哪个群里有视频。<br>在手机上把想看的片子转发到一个群（比如自己建的），回到电视上按确认刷新。";
+            $("empty").innerHTML = T("还没有哪个群里有视频。<br>在手机上把想看的片子转发到一个群（比如自己建的），回到电视上按确认刷新。");
         }
     }
 
@@ -150,10 +147,10 @@
         await TG.login(function (url) {
             n++;
             $("qr").innerHTML = TGLib.qrSvg(url, 10);
-            $("qrstate").textContent = "二维码 30 秒换一张（第 " + n + " 张）";
+            $("qrstate").textContent = T("二维码 30 秒换一张（第 {0} 张）", n);
         }, function () {
-            $("qrstate").textContent = "已扫码，正在登录…";
-        }, askPassword, function () { toast("两步验证密码不对，再输一次"); });
+            $("qrstate").textContent = T("已扫码，正在登录…");
+        }, askPassword, function () { toast(T("两步验证密码不对，再输一次")); });
         R("扫码登录成功（出了 " + n + " 张码）");
         $("panel").classList.remove("on");
     }
@@ -178,12 +175,13 @@
 
     /* ---------- 来源 ---------- */
 
-    var KIND = { self: "", group: "群", channel: "频道", user: "私聊", web: "网页" };
+    var KIND = { self: "", group: T("群"), channel: T("频道"), user: T("私聊"), web: T("网页") };
 
-    /* 来源栏最上面是「搜索」，最下面是「退出登录」 */
+    /* 来源栏最上面是「搜索」，最下面是「退出登录」、换界面语言。换语言那一项用要换成的那种语言写（看不懂当前语言的人也认得出） */
     function railItems() {
-        var sx = { id: "__search", title: S.src && S.src.kind === "search" ? "搜索：" + S.src.query : "搜索", kind: "" };
-        return [sx].concat(S.sources, [{ id: "__logout", title: "退出登录", kind: "" }]);
+        var sx = { id: "__search", title: S.src && S.src.kind === "search" ? T("搜索：{0}", S.src.query) : T("搜索"), kind: "" };
+        return [sx].concat(S.sources, [{ id: "__logout", title: T("退出登录"), kind: "" },
+                                       { id: "__lang", title: I18n.lang === "en" ? "中文界面" : "English", kind: "" }]);
     }
 
     function renderRail() {
@@ -206,7 +204,7 @@
         var g = ++S.gen;
         S.items = []; S.next = undefined; S.total = 0; S.focus = 0; S.gridOff = 0; S.loading = true;
         $("src-title").textContent = src.title;
-        $("src-sub").textContent = "加载中…";
+        $("src-sub").textContent = T("加载中…");
         renderGrid();
         renderRail();
         var t0 = performance.now(), page, links;
@@ -222,7 +220,7 @@
             S.loading = false;
             R("来源「" + src.title + "」出错 " + errStr(e));
             $("src-sub").textContent = "";
-            $("empty").innerHTML = "读不到这里的视频：" + esc(errStr(e)) + "<br>按确认重试";
+            $("empty").innerHTML = T("读不到这里的视频：{0}<br>按确认重试", esc(errStr(e)));
             return;
         }
         if (g !== S.gen) { return; }
@@ -289,7 +287,7 @@
             if (g !== S.gen) { return; }
             S.loading = false;
             R("搜索「" + src.query + "」出错 " + errStr(e));
-            $("empty").innerHTML = "搜索出错：" + esc(errStr(e)) + "<br>按确认重试";
+            $("empty").innerHTML = T("搜索出错：{0}<br>按确认重试", esc(errStr(e)));
             return;
         }
         if (g !== S.gen) { return; }
@@ -299,7 +297,7 @@
         S.total = page.total;
         R("搜索「" + src.query + "」" + Math.round(performance.now() - t0) + "ms，" + S.items.length + " 个" + (page.next ? "，还有" : ""));
         renderGrid();
-        if (!S.items.length) { $("empty").innerHTML = "没搜到「" + esc(src.query) + "」。<br>按 ← 打开来源栏，再选「搜索」换个词。"; }
+        if (!S.items.length) { $("empty").innerHTML = T("没搜到「{0}」。<br>按 ← 打开来源栏，再选「搜索」换个词。", esc(src.query)); }
     }
 
     S.sx = { focus: -1 };
@@ -325,7 +323,7 @@
         Store.addSearch(q);
         closeSearchBox();
         S.zone = "grid";
-        openSource({ id: "__search:" + q, title: "搜索「" + q + "」", kind: "search", query: q });
+        openSource({ id: "__search:" + q, title: T("搜索「{0}」", q), kind: "search", query: q });
     }
     $("sx-q").addEventListener("keydown", function (e) {
         if (e.keyCode !== 13 && e.keyCode !== 65376) { return; }
@@ -366,7 +364,7 @@
         renderRail();
         if (added.length) {
             R("群「" + group.title + "」里的列表链接 → 来源：" + added.map(function (s) { return s.title + " " + s.url; }).join("，"));
-            toast("左边多了" + (added.length > 1 ? " " + added.length + " 个来源" : "一个来源「" + added[0].title + "」") + "，按 ← 打开", 5000);
+            toast(added.length > 1 ? T("左边多了 {0} 个来源，按 ← 打开", added.length) : T("左边多了一个来源「{0}」，按 ← 打开", added[0].title), 5000);
         }
     }
 
@@ -403,15 +401,15 @@
             if (e.needLogin) {
                 R("列表「" + src.title + "」要登录：" + errStr(e) + (S.loggedIn[src.id] ? "（刚登录成功过 —— 登录状态没带上）" : ""));
                 if (S.loggedIn[src.id]) {
-                    $("empty").innerHTML = "登录成功了，但还是看不到这个列表。<br>电视可能带不上这个网站的登录状态（日志里有详情）。";
+                    $("empty").innerHTML = T("登录成功了，但还是看不到这个列表。<br>电视可能带不上这个网站的登录状态（日志里有详情）。");
                 } else {
-                    $("empty").innerHTML = "这个列表要登录一次才能看（查账号编号）。<br>按确认登录";
+                    $("empty").innerHTML = T("这个列表要登录一次才能看（查账号编号）。<br>按确认登录");
                     if (!opts.quiet) { webLogin(src); }
                 }
                 return;
             }
             R("列表「" + src.title + "」出错 " + errStr(e));
-            $("empty").innerHTML = "读不到这个列表：" + esc(errStr(e)) + "<br>按确认重试";
+            $("empty").innerHTML = T("读不到这个列表：{0}<br>按确认重试", esc(errStr(e)));
             return;
         }
         if (g !== S.gen) { return; }
@@ -452,19 +450,19 @@
         var src = S.loginSrc, user = $("wl-user").value.trim(), pass = $("wl-pass").value;
         if (!user) { $("wl-user").focus(); return; }
         if (!pass) { $("wl-pass").focus(); return; }
-        $("wl-msg").textContent = "正在登录…";
+        $("wl-msg").textContent = T("正在登录…");
         try { document.activeElement.blur(); } catch (e) {}
         var t0 = performance.now();
         Web.login(src.url, user, pass).then(function (r) {
             R("登录 " + new URL(src.url).hostname + "：" + (r.ok ? "成功，账号编号 " + r.userId + (r.favs != null ? "，收藏 " + r.favs + " 个" : "") : "失败 " + r.msg) + "，" + Math.round(performance.now() - t0) + "ms");
-            if (!r.ok) { $("wl-msg").textContent = "登录失败：" + r.msg; $("wl-pass").value = ""; $("wl-pass").focus(); return; }
+            if (!r.ok) { $("wl-msg").textContent = T("登录失败：{0}", r.msg); $("wl-pass").value = ""; $("wl-pass").focus(); return; }
             S.loggedIn[src.id] = true;
             closeWebLogin();
-            toast("登录成功");
+            toast(T("登录成功"));
             openSource(src);
         }).catch(function (e) {
             R("登录出错 " + errStr(e));
-            $("wl-msg").textContent = "登录出错：" + errStr(e);
+            $("wl-msg").textContent = T("登录出错：{0}", errStr(e));
         });
     }
     /* 13 = 确认，65376 = 屏幕键盘上的「完成」 */
@@ -498,9 +496,9 @@
         var x = LEFT + (i % COLS) * (CARD_W + GAP_X), y = TOP + Math.floor(i / COLS) * PITCH_Y;
         var th = S.thumbs[it.fileKey];
         var ext = it.asFile && /\.(mkv|webm|mov|m4v)$/i.exec(it.fileName || "");
-        var meta = [S.src && S.src.kind === "search" ? it.chatTitle : "", it.kind === "web" ? "网页 · " + it.site : (ext ? ext[1].toUpperCase() + " · " : "") + fmtSize(it.size), fmtDate(it.date)].filter(Boolean).join(" · ");
-        if (p && p.done) { meta = "看完了 · " + meta; }
-        else if (p && p.t > 0) { meta = "看到 " + fmtTime(p.t) + " · " + meta; }
+        var meta = [S.src && S.src.kind === "search" ? it.chatTitle : "", it.kind === "web" ? T("网页 · {0}", it.site) : (ext ? ext[1].toUpperCase() + " · " : "") + fmtSize(it.size), fmtDate(it.date)].filter(Boolean).join(" · ");
+        if (p && p.done) { meta = T("看完了 · {0}", meta); }
+        else if (p && p.t > 0) { meta = T("看到 {0} · {1}", fmtTime(p.t), meta); }
         return "<div class='card' id='c" + i + "' style='left:" + x + "px;top:" + y + "px'>" +
             "<div class='thumb" + (th && th.kind === "poster" ? " hasposter" : "") + "'><div class='ph' style='" + phStyle(it.title) + "'><span>" + esc(it.title) + "</span></div>" + (th && th.url ? coverHtml(it, th) : "") +
             (it.duration ? "<div class='dur'>" + fmtTime(it.duration) + "</div>" : "") +
@@ -521,14 +519,14 @@
         $("grid").innerHTML = html;
         $("grid").style.height = TOP + Math.ceil(S.items.length / COLS) * PITCH_Y + "px";
         if (S.loading && !S.items.length) {
-            $("empty").innerHTML = "加载中…";
+            $("empty").innerHTML = T("加载中…");
         } else if (!S.items.length) {
-            $("empty").innerHTML = "这里没有视频。<br>在手机上找到想看的片子，长按 → <b>转发</b> → 选这个群，回到电视上按确认刷新。";
+            $("empty").innerHTML = T("这里没有视频。<br>在手机上找到想看的片子，长按 → <b>转发</b> → 选这个群，回到电视上按确认刷新。");
         } else {
             $("empty").innerHTML = "";
         }
         if (S.src && !S.loading) {
-            $("src-sub").textContent = S.total ? "共 " + S.total + " 个视频" + (S.items.length < S.total ? "（已加载 " + S.items.length + "）" : "") : "";
+            $("src-sub").textContent = S.total ? T("共 {0} 个视频", S.total) + (S.items.length < S.total ? T("（已加载 {0}）", S.items.length) : "") : "";
         }
         updateFocus();
     }
@@ -745,8 +743,8 @@
 
     function onPlayerState(phase, msg) {
         if (S.screen !== "player") { return; }
-        if (phase === "loading") { spin(true, "正在打开…"); }
-        else if (phase === "buffering") { spin(true, "缓冲中…"); }
+        if (phase === "loading") { spin(true, T("正在打开…")); }
+        else if (phase === "buffering") { spin(true, T("缓冲中…")); }
         else if (phase === "playing") { spin(false); }
         else if (phase === "note") { toast(msg, 5000); }
         else if (phase === "ended") { onEnded(); }
@@ -771,7 +769,7 @@
         $("ov-title").textContent = it.title;
         if (!again) { resetSubs(it); }
         showOverlay();
-        spin(true, again ? "换音轨…" : "正在打开…");
+        spin(true, again ? T("换音轨…") : T("正在打开…"));
         var p = Store.getProgress(it.fileKey);
         var startAt = again ? opts.startAt : p && !p.done && p.t > 20 ? p.t : 0;
         await Cover.cancel();
@@ -783,7 +781,7 @@
         var pref = Store.getPrefs(it.fileKey);
         R((again ? "换音轨重开「" : "播放「") + it.title + "」" + fmtSize(it.size) + " " + fmtTime(it.duration) + (it.asFile ? "（文件 " + (it.fileName || it.mime) + "）" : "") +
           (startAt ? "，从 " + fmtTime(startAt) + (again ? "" : " 接着放") : "") + (moov ? "，" + (moov.mkv ? "MKV 头" : "moov") + "有缓存" : "") + (opts.audio || pref.audio ? "，音轨 " + (opts.audio || pref.audio) : ""));
-        if (startAt && !again) { toast("从 " + fmtTime(startAt) + " 接着放"); }
+        if (startAt && !again) { toast(T("从 {0} 接着放", fmtTime(startAt))); }
         var t0 = performance.now();
         player.open(TG.source(it), {
             startAt: startAt,
@@ -820,9 +818,9 @@
         if (S.playing !== it) { return; }
         player = webPlayer;
         R("播放网页「" + it.title + "」" + it.url + (startAt ? "，从 " + fmtTime(startAt) + " 接着放" : ""));
-        if (startAt) { toast("从 " + fmtTime(startAt) + " 接着放"); }
+        if (startAt) { toast(T("从 {0} 接着放", fmtTime(startAt))); }
         var t0 = performance.now(), opening = player.open(it, { startAt: startAt });
-        spin(true, "正在解析网页…");      // open 里报的 loading 会写成「正在打开…」，这里盖掉
+        spin(true, T("正在解析网页…"));      // open 里报的 loading 会写成「正在打开…」，这里盖掉
         opening.then(function () {
             if (S.playing !== it) { return; }
             R("出画面 " + Math.round(performance.now() - t0) + "ms");
@@ -877,12 +875,12 @@
             S.focus = i;
             updateFocus();
         }
-        if (ended) { toast("看完了"); }
+        if (ended) { toast(T("看完了")); }
     }
 
     function showError(msg) {
         spin(false);
-        $("perr").innerHTML = "放不了：" + esc(msg || "未知错误") + "<br><span style='color:#8b939b;font-size:28px'>按返回键回到列表</span>";
+        $("perr").innerHTML = T("放不了：{0}", esc(msg || T("未知错误"))) + "<br><span style='color:#8b939b;font-size:28px'>" + T("按返回键回到列表") + "</span>";
         $("perr").style.display = "block";
         R("放不了：" + msg);
     }
@@ -904,14 +902,14 @@
     function drawOverlay() {
         if (!$("ov").classList.contains("on")) { return; }
         var d = player.duration(), t = S.pending !== null ? S.pending : video.currentTime;
-        if (!d) { $("ov-time").textContent = "正在打开…"; return; }
+        if (!d) { $("ov-time").textContent = T("正在打开…"); return; }
         var pct = Math.min(100, t / d * 100);
         $("ov-fill").style.width = pct + "%";
         $("ov-dot").style.left = pct + "%";
         var b = video.buffered, end = 0;
         for (var i = 0; i < b.length; i++) { if (b.start(i) <= video.currentTime + 0.5 && b.end(i) > video.currentTime) { end = b.end(i); } }
         $("ov-buf").style.width = Math.min(100, end / d * 100) + "%";
-        $("ov-time").textContent = fmtTime(t) + " / " + fmtTime(d) + (video.paused && S.pending === null ? "　已暂停" : "");
+        $("ov-time").textContent = fmtTime(t) + " / " + fmtTime(d) + (video.paused && S.pending === null ? "　" + T("已暂停") : "");
     }
 
     /* ---------- 音轨、字幕 ---------- */
@@ -921,23 +919,28 @@
                  ita: "意大利语", it: "意大利语", rus: "俄语", ru: "俄语", tha: "泰语", th: "泰语", por: "葡萄牙语", pt: "葡萄牙语", vie: "越南语", hin: "印地语" };
     function langName(l) {
         l = String(l || "").toLowerCase();
-        if (/^zh-?(hans|cn|sg)/.test(l)) { return "简体中文"; }
-        if (/^zh-?(hant|tw|hk|mo)/.test(l)) { return "繁体中文"; }
-        return LANG[l] || LANG[l.split("-")[0]] || "";
+        if (/^zh-?(hans|cn|sg)/.test(l)) { return T("简体中文"); }
+        if (/^zh-?(hant|tw|hk|mo)/.test(l)) { return T("繁体中文"); }
+        var n = LANG[l] || LANG[l.split("-")[0]];
+        return n ? T(n) : "";
     }
     function isZh(x) {
         return /^(chi|zho|zh|cmn|yue)\b/i.test(x.lang || "") || /中|国语|國語|普通话|粤|简|繁|chs|cht|chinese|mandarin|cantonese/i.test(x.name || "");
     }
+    function isEn(x) { return /^(eng|en)\b/i.test(x.lang || "") || /english|英/i.test(x.name || ""); }
+    /* 「看得懂的语言」跟界面走：中文界面 = 中文，英文界面 = 英文 */
+    function isMine(x) { return I18n.lang === "en" ? isEn(x) : isZh(x); }
     var CODEC = { "ac-3": "杜比 AC-3", "ec-3": "杜比 E-AC-3", opus: "Opus", flac: "FLAC", "mp4a.6B": "MP3", "mp4a.69": "MP3" };
-    function codecName(c) { c = String(c || ""); return CODEC[c] || (/^mp4a\.40/.test(c) ? "AAC" : c.replace(/^A_/, "")); }
-    function chName(n) { return n === 1 ? "单声道" : n === 2 ? "立体声" : n === 6 ? "5.1" : n === 8 ? "7.1" : n ? n + " 声道" : ""; }
+    function codecName(c) { c = String(c || ""); return CODEC[c] ? T(CODEC[c]) : /^mp4a\.40/.test(c) ? "AAC" : c.replace(/^A_/, ""); }
+    function paren(x) { return I18n.lang === "en" ? " (" + x + ")" : "（" + x + "）"; }
+    function chName(n) { return n === 1 ? T("单声道") : n === 2 ? T("立体声") : n === 6 ? "5.1" : n === 8 ? "7.1" : n ? T("{0} 声道", n) : ""; }
     function audioLabel(a, i) {
         var l = langName(a.lang), nm = a.name && a.name !== l ? a.name : "";
-        return [l || nm || "音轨 " + (i + 1), l && nm ? nm : "", codecName(a.codec), chName(a.channels)].filter(Boolean).join(" · ");
+        return [l || nm || T("音轨 {0}", i + 1), l && nm ? nm : "", codecName(a.codec), chName(a.channels)].filter(Boolean).join(" · ");
     }
     function subLabel(t, i) {
         var l = langName(t.lang), nm = t.name && t.name !== l ? t.name : "";
-        return [l || nm || "字幕 " + (i + 1), l && nm ? nm : "", /PGS/.test(t.codec) && !/图形/.test(nm) ? "图形" : ""].filter(Boolean).join(" · ") + "（片子里）";
+        return [l || nm || T("字幕 {0}", i + 1), l && nm ? nm : "", /PGS/.test(t.codec) && !/图形|image|pgs/i.test(nm) ? T("图形") : ""].filter(Boolean).join(" · ") + T("（片子里）");
     }
 
     /* S.subs：这部片子的字幕状态。emb = 片子里的轨（key → {info, track, label}）；files = 群里找到的字幕文件；
@@ -975,7 +978,8 @@
     }
 
     /* 默认开哪个：这部片子上次选过的 → 强制字幕 → 对白不是中文时，中文字幕（片子里的优先，再看群里对得上名字的文件）→ 关。
-     * 对白是中文就不自动开（国产片多半是硬字幕）。等音轨和字幕文件都知道了才定。 */
+     * 对白是中文就不自动开（国产片多半是硬字幕）。等音轨和字幕文件都知道了才定。
+     * 英文界面同样的规则换成英文：对白不是英文时开英文字幕。 */
     function decideSubs() {
         var ss = S.subs;
         if (!ss || ss.decided || !ss.gotTracks || !ss.gotFiles) { return; }
@@ -986,12 +990,13 @@
         var forced = emb.filter(function (t) { return t.isForced; })[0];
         if (forced) { applySub(forced.key, "强制字幕"); return; }
         var cur = S.tracks && S.tracks.audio.filter(function (a) { return a.current; })[0];
-        if (cur && isZh(cur)) { if (emb.length || ss.files.length) { toast("有字幕，长按确认键可以打开", 4000); } return; }
-        var zh = emb.filter(isZh), pick = zh.filter(function (t) { return t.isDefault; })[0] || zh[0];
-        if (pick) { applySub(pick.key, "中文字幕"); return; }
-        var f = ss.files[0];
-        if (f && f.score >= 3 && (!f.lang || f.lang !== "英文")) { applySub("f:" + f.name, "名字对得上的字幕文件"); return; }
-        if (emb.length || ss.files.length) { toast("有字幕，长按确认键可以选", 4000); }
+        if (cur && isMine(cur)) { if (emb.length || ss.files.length) { toast(T("有字幕，长按确认键可以打开"), 4000); } return; }
+        var mine = emb.filter(isMine), pick = mine.filter(function (t) { return t.isDefault; })[0] || mine[0];
+        if (pick) { applySub(pick.key, I18n.lang === "en" ? "英文字幕" : "中文字幕"); return; }
+        /* 字幕文件：没写语言的也算（群里发的多半就是群里人看得懂的） */
+        var f = ss.files[0], fl = f && f.lang;
+        if (f && f.score >= 3 && (!fl || (I18n.lang === "en" ? fl === "英文" || fl === "中英" : fl !== "英文"))) { applySub("f:" + f.name, "名字对得上的字幕文件"); return; }
+        if (emb.length || ss.files.length) { toast(T("有字幕，长按确认键可以选"), 4000); }
     }
 
     /* why 有值 = 自动选的（不记）；没有 = 用户在菜单里选的（记下来，下次这部片子直接用） */
@@ -999,18 +1004,18 @@
         var ss = S.subs, it = ss.it;
         if (!why) { Store.setPrefs(it.fileKey, { sub: key }); }
         ss.on = key;
-        if (!key) { S.subR.set(null); if (!why) { toast("字幕关了"); } return; }
+        if (!key) { S.subR.set(null); if (!why) { toast(T("字幕关了")); } return; }
         if (key.indexOf("s:") === 0) {
             var e = ss.emb[key];
             if (!e) { ss.on = ""; return; }
             S.subR.set(e.track);
             R("字幕 → " + e.label + (why ? "（" + why + "）" : ""));
             if (e.track.kind === "image" && !why) { player.refetch("换图形字幕，重读"); }
-            toast("字幕：" + e.label.replace("（片子里）", ""));
+            toast(T("字幕：{0}", e.label.replace(T("（片子里）"), "")));
             return;
         }
         var name = key.slice(2), f = ss.files.filter(function (x) { return x.name === name; })[0];
-        if (ss.fileTracks[name]) { S.subR.set(ss.fileTracks[name]); toast("字幕：" + name); return; }
+        if (ss.fileTracks[name]) { S.subR.set(ss.fileTracks[name]); toast(T("字幕：{0}", name)); return; }
         if (!f) { ss.on = ""; return; }
         var t0 = performance.now();
         TG.download(f.doc).then(function (bytes) {
@@ -1020,12 +1025,12 @@
             ss.fileTracks[name] = tr;
             R("字幕文件「" + name + "」" + Math.round(bytes.length / 1024) + "KB " + ev.length + " 条，" + Math.round(performance.now() - t0) + "ms" + (why ? "（" + why + "）" : ""));
             if (S.subs !== ss || ss.on !== key) { return; }
-            if (!ev.length) { toast("字幕文件「" + name + "」里读不出字幕"); ss.on = ""; return; }
+            if (!ev.length) { toast(T("字幕文件「{0}」里读不出字幕", name)); ss.on = ""; return; }
             S.subR.set(tr);
-            toast("字幕：" + (f.lang ? f.lang + " · " : "") + name);
+            toast(T("字幕：{0}", (f.lang ? T(f.lang) + " · " : "") + name));
         }).catch(function (e) {
             R("字幕文件「" + name + "」下载出错 " + errStr(e));
-            if (S.subs === ss && ss.on === key) { ss.on = ""; toast("字幕文件下不下来：" + errStr(e)); }
+            if (S.subs === ss && ss.on === key) { ss.on = ""; toast(T("字幕文件下不下来：{0}", errStr(e))); }
         });
     }
     function setSubOffset(d) {
@@ -1050,31 +1055,31 @@
     function menuRows() {
         var rows = [], tr = S.tracks || { audio: [], subs: [] }, ss = S.subs;
         if (tr.audio.length > 1) {
-            rows.push({ h: "音轨" });
+            rows.push({ h: T("音轨") });
             tr.audio.forEach(function (a, i) {
-                rows.push({ label: audioLabel(a, i) + (a.ok ? "" : "（" + a.why + "）"), ck: a.current, dis: !a.ok, act: function () { closeMenu(); switchAudio(a.key); } });
+                rows.push({ label: audioLabel(a, i) + (a.ok ? "" : paren(a.why)), ck: a.current, dis: !a.ok, act: function () { closeMenu(); switchAudio(a.key); } });
             });
         }
-        rows.push({ h: "字幕" });
-        rows.push({ label: "关", ck: !ss.on, act: function () { applySub(""); closeMenu(); } });
+        rows.push({ h: T("字幕") });
+        rows.push({ label: T("关"), ck: !ss.on, act: function () { applySub(""); closeMenu(); } });
         ss.embList.forEach(function (k) {
             var e = ss.emb[k];
             rows.push({ label: e.label, ck: ss.on === k, act: function () { applySub(k); closeMenu(); } });
         });
         ss.files.forEach(function (f) {
             var k = "f:" + f.name;
-            rows.push({ label: (f.lang ? f.lang + " · " : "") + f.name + "（群里的文件）", ck: ss.on === k, act: function () { applySub(k); closeMenu(); } });
+            rows.push({ label: (f.lang ? T(f.lang) + " · " : "") + f.name + T("（群里的文件）"), ck: ss.on === k, act: function () { applySub(k); closeMenu(); } });
         });
         if (!ss.embList.length && !ss.files.length) {
-            rows.push({ label: ss.gotFiles ? "没有找到字幕" : "正在找群里的字幕文件…", dis: true });
+            rows.push({ label: ss.gotFiles ? T("没有找到字幕") : T("正在找群里的字幕文件…"), dis: true });
         }
         if (ss.on) {
-            rows.push({ h: "字幕时间（和对白对不上时调）" });
-            rows.push({ label: "← " + (ss.off > 0 ? "推迟 " + ss.off.toFixed(1) : ss.off < 0 ? "提前 " + (-ss.off).toFixed(1) : "不调 0.0") + " 秒 →", adjust: true });
+            rows.push({ h: T("字幕时间（和对白对不上时调）") });
+            rows.push({ label: ss.off > 0 ? T("← 推迟 {0} 秒 →", ss.off.toFixed(1)) : ss.off < 0 ? T("← 提前 {0} 秒 →", (-ss.off).toFixed(1)) : T("← 不调 0.0 秒 →"), adjust: true });
         }
         var nx = nextEpisodeLoaded(S.playing);
         if (nx) {
-            rows.push({ h: "下一集" });
+            rows.push({ h: T("下一集") });
             rows.push({ label: nx.title, act: function () { closeMenu(); playNext(nx); } });
         }
         return rows;
@@ -1085,6 +1090,7 @@
         var r = S.menu.rows, cur = r.findIndex(function (x) { return x.ck && !x.dis; });
         S.menu.focus = cur >= 0 ? cur : r.findIndex(function (x) { return !x.h && !x.dis; });
         drawMenu();
+        $("toast").style.display = "none";      // 提示条在上方正中，会压在菜单的标题上
         $("menu").classList.add("on");
     }
     function closeMenu() { S.menu = null; $("menu").classList.remove("on"); }
@@ -1192,7 +1198,7 @@
         closeMenu();
         var u = S.upnext = { it: nx, left: 8 };
         $("upnext-t").textContent = nx.title;
-        var draw = function () { $("upnext-k").textContent = u.left + " 秒后开始　·　确认 现在放　·　返回 不放了"; };
+        var draw = function () { $("upnext-k").textContent = T("{0} 秒后开始　·　确认 现在放　·　返回 不放了", u.left); };
         draw();
         $("upnext").classList.add("on");
         clearTimeout(S.ovTimer);
@@ -1243,8 +1249,8 @@
         var diff = S.pending - video.currentTime;
         var h = $("seekhint");
         h.innerHTML = esc((diff >= 0 ? "+" : "−") + fmtTime(Math.abs(diff)) + "　→ " + fmtTime(S.pending)) +
-            "<div style='font-size:30px;font-weight:normal;color:#c5cad0;margin-top:10px'>每下 " +
-            (Math.abs(delta) >= 60 ? Math.abs(delta) / 60 + " 分钟" : Math.abs(delta) + " 秒") + "</div>";
+            "<div style='font-size:30px;font-weight:normal;color:#c5cad0;margin-top:10px'>" +
+            (Math.abs(delta) >= 60 ? T("每下 {0} 分钟", Math.abs(delta) / 60) : T("每下 {0} 秒", Math.abs(delta))) + "</div>";
         h.style.display = "block";
         showOverlay();
         clearTimeout(S.pendTimer);
@@ -1270,7 +1276,7 @@
             if (S.zone === "rail") { S.zone = "grid"; renderRail(); updateFocus(); return; }
             if (Date.now() - S.backAt < 2000) { exitApp(); return; }
             S.backAt = Date.now();
-            toast("再按一次返回键退出");
+            toast(T("再按一次返回键退出"));
             return;
         }
         if (S.zone === "rail") {
@@ -1281,11 +1287,18 @@
             else if (k === 13) {
                 var s = list[S.railFocus];
                 if (s.id === "__search") { S.zone = "grid"; renderRail(); updateFocus(); openSearchBox(); return; }
+                if (s.id === "__lang") {
+                    var to = I18n.lang === "en" ? "zh" : "en";
+                    R("界面语言 " + I18n.lang + " → " + to);
+                    I18n.set(to);
+                    location.reload();
+                    return;
+                }
                 if (s.id === "__logout") {
                     if (Date.now() - S.logoutAt < 3000) {
                         R("退出登录");
                         TG.logout().then(function () { location.reload(); });
-                    } else { S.logoutAt = Date.now(); toast("再按一次确认，退出 Telegram 登录"); }
+                    } else { S.logoutAt = Date.now(); toast(T("再按一次确认，退出 Telegram 登录")); }
                     return;
                 }
                 S.zone = "grid";

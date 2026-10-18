@@ -18,6 +18,8 @@ const { chromium } = require('playwright-core');
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const OUT = ROOT + 'docs/screenshots/';
+/* UILANG=en：英文界面的那一套（docs/screenshots/en-*.jpg，README.en.md 用），片名、群名也换成英文 */
+const EN = process.env.UILANG === 'en', PRE = EN ? 'en-' : '';
 fs.mkdirSync(OUT, { recursive: true });
 const sintel = ROOT + 'test/media/sintel_trailer-1080p.mp4';
 if (!fs.existsSync(sintel)) { console.log('先下载 Sintel 预告片，见文件开头'); process.exit(1); }
@@ -38,8 +40,9 @@ const films = [
 for (const [, , thumb] of films) {
   if (!fs.existsSync(ROOT + 'test/media/thumbs/' + thumb + '.jpg')) { console.log('缺封面 test/media/thumbs/' + thumb + '.jpg，见文件开头'); process.exit(1); }
 }
+const enTitle = (t) => t === 'Sintel 预告片' ? 'Sintel (trailer)' : t.replace(/\s*[\u4e00-\u9fff].*$/, '');
 const items = films.map(([title, duration, thumb, file], i) => ({
-  key: 'k' + i, fileKey: 'f' + i, file: file || 'missing-' + i, thumb, title, duration,
+  key: 'k' + i, fileKey: 'f' + i, file: file || 'missing-' + i, thumb, title: EN ? enTitle(title) : title, duration,
   size: file ? fs.statSync(sintel).size : Math.round(duration * 1.6 * 1048576 / 10),
   date: Date.now() - (i * 2 + 1) * day, info: { year: '', rating: '', director: '' } }));
 
@@ -66,8 +69,8 @@ var TG = (function () {
     init: async function () {}, mode: function () { return "stub"; }, me: async function () { return { id: 1 }; },
     login: async function () {}, logout: async function () {},
     videoCount: async function (src) { return src === "c" ? 0 : 9; },
-    sources: async function () { return [{ id: "a", title: "开源动画", kind: "channel" }, { id: "b", title: "我转发的", kind: "group" },
-      { id: "d", title: "纪录片", kind: "channel" }, { id: "e", title: "旅行视频", kind: "group" }, { id: "c", title: "空的群", kind: "group" }]; },
+    sources: async function () { var en = ${EN}; return [{ id: "a", title: en ? "Open movies" : "开源动画", kind: "channel" }, { id: "b", title: en ? "Forwarded by me" : "我转发的", kind: "group" },
+      { id: "d", title: en ? "Documentaries" : "纪录片", kind: "channel" }, { id: "e", title: en ? "Travel" : "旅行视频", kind: "group" }, { id: "c", title: en ? "Empty group" : "空的群", kind: "group" }]; },
     videos: async function () { return { items: ITEMS, next: undefined, total: ITEMS.length }; },
     links: async function () { return []; },
     thumb: async function (it) {
@@ -93,16 +96,16 @@ const key = async (code, n = 1) => { for (let i = 0; i < n; i++) { await page.ev
 const shot = async (name) => {
   const png = os.tmpdir() + '/tg-shot-' + name + '.png';
   await page.screenshot({ path: png });
-  execFileSync('sips', ['-s', 'format', 'jpeg', '-s', 'formatOptions', '82', '-Z', '1600', png, '--out', OUT + name + '.jpg'], { stdio: 'ignore' });
+  execFileSync('sips', ['-s', 'format', 'jpeg', '-s', 'formatOptions', '82', '-Z', '1600', png, '--out', OUT + PRE + name + '.jpg'], { stdio: 'ignore' });
   console.log('  截图 ' + name);
 };
 
 await page.goto('http://localhost:8768/app/index.html');
 /* 「看到哪里」：Sintel 看过一半，卡片上有进度条，打开从那里接着放 */
-await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
+await page.evaluate((l) => { try { localStorage.clear(); localStorage.setItem('tg.lang.v1', l); } catch (e) {} }, EN ? 'en' : 'zh');
 await page.reload();
 await sleep(1200);
-await page.evaluate(() => Store.setProgress('f0', 31, 52, 'Sintel 预告片'));
+await page.evaluate((t) => Store.setProgress('f0', 31, 52, t), items[0].title);
 await page.reload();
 await sleep(2500);
 await shot('01-home');

@@ -15,6 +15,8 @@
  */
 var Mp4 = (function () {
     "use strict";
+    /* 显示给用户的话（i18n.js）；node 里的离线测试没有 I18n，原样用中文 */
+    var tx = typeof I18n !== "undefined" ? I18n.t : function (s) { var a = arguments; return String(s).replace(/\{(\d)\}/g, function (m, i) { return a[+i + 1]; }); };
 
     /* ---------- 读 ---------- */
 
@@ -144,7 +146,7 @@ var Mp4 = (function () {
             if (t === "avc1" || t === "avc3") { tr.codec = avcCodec(b, entry, t); }
             else if (t === "hvc1" || t === "hev1") { tr.codec = hevcCodec(b, entry, t); }
             else if (t === "av01") { tr.codec = "av01.0.08M.08"; }
-            else { tr.codec = t; tr.unsupported = "视频格式 " + t; }
+            else { tr.codec = t; tr.unsupported = tx("视频格式 {0} 放不了", t); }
             tr.config = entry.config || null;
             tr.mime = "video/mp4; codecs=\"" + tr.codec + "\"";
         } else if (tr.kind === "audio") {
@@ -156,13 +158,13 @@ var Mp4 = (function () {
             else if (t === "ac-3" || t === "ec-3") { tr.codec = t; }
             else if (t === "Opus") { tr.codec = "opus"; }
             else if (t === "fLaC") { tr.codec = "flac"; }
-            else { tr.codec = t; tr.unsupported = "音频格式 " + t; }
+            else { tr.codec = t; tr.unsupported = tx("音频格式 {0} 放不了", t); }
             tr.mime = "audio/mp4; codecs=\"" + tr.codec + "\"";
         } else {
             /* 字幕轨：tx3g（ffmpeg 的 mov_text）、QuickTime 的 text（样本格式一样：2 字节长度 + 文字）、wvtt（ISO 14496-30）。
              * 不进 SourceBuffer，样本交给 subs.js */
             tr.codec = t === "text" ? "tx3g" : t;
-            if (t !== "tx3g" && t !== "text" && t !== "wvtt") { tr.unsupported = "字幕格式 " + t; }
+            if (t !== "tx3g" && t !== "text" && t !== "wvtt") { tr.unsupported = tx("字幕格式 {0} 放不了", t); }
         }
         tr.stsd = b.slice(stsd.s, stsd.e);
     }

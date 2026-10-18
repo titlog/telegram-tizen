@@ -2,6 +2,8 @@
  * 底下是 mtcute（build/ 打成 js/tg.bundle.js，全局 TGLib）。 */
 var TG = (function () {
     "use strict";
+    /* 显示给用户的话（i18n.js）；node 里的离线测试没有 I18n，原样用中文 */
+    var tx = typeof I18n !== "undefined" ? I18n.t : function (s) { var a = arguments; return String(s).replace(/\{(\d)\}/g, function (m, i) { return a[+i + 1]; }); };
 
     var client = null, mode = "", remake = null, reconnecting = null, reconnects = 0;
     var VIDEO = { _: "inputMessagesFilterVideo" };
@@ -13,7 +15,7 @@ var TG = (function () {
     var SUB_EXT = /\.(srt|ass|ssa|vtt)$/i;
 
     function timeout(p, ms, what) {
-        return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error(what + " " + ms / 1000 + " 秒没回")); }, ms); })]);
+        return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error(tx("{0} {1} 秒没回", tx(what), ms / 1000))); }, ms); })]);
     }
 
     /* mtcute 默认在后台线程（见 build/src/worker.js）；15 秒连不上就退回主线程直连 */
@@ -271,7 +273,7 @@ var TG = (function () {
      * 没有就去掉 #标签（只剩标签时保留标签的字）。链接、@提及都去掉。没有说明文字用文件名。
      * 第一版把 #标签连字一起删了，电视上只剩「《 国语 高清》」（用户 2026-10-01 拍照报的）。 */
     function title(m) {
-        return captionTitle(m) || nameTitle((m.media && m.media.fileName) || "视频");
+        return captionTitle(m) || nameTitle((m.media && m.media.fileName) || tx("视频"));
     }
     /* 文件名当片名：「The.Last.Emperor.1987.1080p.BluRay.x264-WiKi.mkv」→「The Last Emperor 1987」。开头的 [字幕组] 去掉，
      * 年份留着、年份后面（分辨率、片源、编码、发布组）截掉；没有年份就截在第一个分辨率 / 片源词上。集数（S01E02、第3集）不截。 */

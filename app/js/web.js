@@ -40,6 +40,8 @@
  * （publicUrl），只存编号和名字，不存密码（2026-10-02）。 */
 var Web = (function () {
     "use strict";
+    /* 显示给用户的话（i18n.js）；node 里的离线测试没有 I18n，原样用中文 */
+    var tx = typeof I18n !== "undefined" ? I18n.t : function (s) { var a = arguments; return String(s).replace(/\{(\d)\}/g, function (m, i) { return a[+i + 1]; }); };
 
     var SITES = [];
     function register(site) { SITES.push(site); }
@@ -78,8 +80,8 @@ var Web = (function () {
             x.timeout = ms;
             if (body) { x.setRequestHeader("Content-Type", "application/x-www-form-urlencoded"); x.setRequestHeader("X-Requested-With", "XMLHttpRequest"); }
             x.onload = function () { resolve({ status: x.status, text: x.responseText || "", url: x.responseURL || url }); };
-            x.onerror = function () { reject(new Error("网络错误")); };
-            x.ontimeout = function () { reject(new Error(ms / 1000 + " 秒没回")); };
+            x.onerror = function () { reject(new Error(tx("网络错误"))); };
+            x.ontimeout = function () { reject(new Error(tx("{0} 秒没回", ms / 1000))); };
             x.send(body);
         });
     }
@@ -90,19 +92,19 @@ var Web = (function () {
      * 同一个 cookie 让后面的 XHR 也能过。 */
     function viaFrame(url, pick, ms) {
         return new Promise(function (resolve) {
-            var f = document.createElement("iframe"), t0 = Date.now(), note = "没开始";
+            var f = document.createElement("iframe"), t0 = Date.now(), note = tx("没开始");
             f.style.cssText = "position:absolute;left:-4000px;top:0;width:640px;height:360px;border:0;visibility:hidden";
             var timer = setInterval(function () {
                 var found = null;
                 try {
                     var w = f.contentWindow;
                     found = pick(w);
-                    note = "读得到框，" + w.location.host + "「" + String(w.document.title).slice(0, 30) + "」";
+                    note = tx("读得到框，{0}「{1}」", w.location.host, String(w.document.title).slice(0, 30));
                     /* chromewebdata = 浏览器自己的错误页（电视 2026-10-02 开收藏页落到这里），把错误码带上 */
                     if (/chromewebdata/.test(w.location.host) || w.location.protocol === "chrome-error:") {
-                        note += " 错误页：" + String(w.document.body && w.document.body.innerText || "").replace(/\s+/g, " ").slice(0, 120);
+                        note += " " + tx("错误页：{0}", String(w.document.body && w.document.body.innerText || "").replace(/\s+/g, " ").slice(0, 120));
                     }
-                } catch (e) { note = "读不了框：" + errStr(e); }
+                } catch (e) { note = tx("读不了框：{0}", errStr(e)); }
                 if (found || Date.now() - t0 > ms) {
                     clearInterval(timer);
                     f.remove();
@@ -117,7 +119,7 @@ var Web = (function () {
     async function resolve(url) {
         url = normalize(url);
         var s = siteOf(url), t0 = performance.now(), notes = [];
-        if (!s) { throw new Error("不认识这个网站：" + host(url)); }
+        if (!s) { throw new Error(tx("不认识这个网站：{0}", host(url))); }
         if (s.name === "direct") { return { url: url, type: typeOf(url), how: "直链", ms: 0 }; }
         try {
             var r = await get(url, 15000), found = r.status === 200 ? s.fromHtml(r.text) : null;
@@ -125,15 +127,15 @@ var Web = (function () {
                 found = new URL(found, r.url).href;
                 return { url: found, type: typeOf(found), how: "XHR", ms: performance.now() - t0 };
             }
-            notes.push("XHR " + r.status + (cloudflare(r.text) ? " Cloudflare 挡了" : r.status === 200 ? " 页面里没有地址" : ""));
+            notes.push("XHR " + r.status + (cloudflare(r.text) ? " " + tx("Cloudflare 挡了") : r.status === 200 ? " " + tx("页面里没有地址") : ""));
         } catch (e) { notes.push("XHR " + errStr(e)); }
         var fr = await viaFrame(url, function (w) { return s.fromWin(w) || s.fromHtml(w.document.documentElement.innerHTML); }, 25000);
-        notes.push("框：" + fr.note);
+        notes.push(tx("框：{0}", fr.note));
         if (fr.url) {
             var u = new URL(fr.url, url).href;
             return { url: u, type: typeOf(u), how: notes.join("；"), ms: performance.now() - t0 };
         }
-        throw new Error("解析不出视频地址（" + notes.join("；") + "）");
+        throw new Error(tx("解析不出视频地址（{0}）", notes.join(tx("；"))));
     }
 
     /* ---------- 列表 ---------- */
@@ -177,12 +179,12 @@ var Web = (function () {
     /* cursor：第一页传 undefined，之后传上一页返回的 next */
     async function list(url, cursor) {
         var s = listOf(url), page = cursor ? cursor.page : 1, t0 = performance.now();
-        if (!s) { throw new Error("不认识这个列表：" + url); }
+        if (!s) { throw new Error(tx("不认识这个列表：{0}", url)); }
         if (!s.parseList) { throw new Error(s.name + " 的规则没有 parseList"); }
         var wantLogin = s.needLogin && s.needLogin(new URL(url));
         if (wantLogin) {
             var acct = accounts()[new URL(url).hostname];
-            if (!acct) { var e0 = new Error("要登录一次（查账号编号）"); e0.needLogin = true; throw e0; }
+            if (!acct) { var e0 = new Error(tx("要登录一次（查账号编号）")); e0.needLogin = true; throw e0; }
             url = s.publicUrl(new URL(url), acct);
             wantLogin = false;
         }
@@ -190,7 +192,7 @@ var Web = (function () {
         var r = await getRetry(at, 15000), html = null, how = "XHR" + (r.tries > 1 ? " 第 " + r.tries + " 次" : "");
         /* 要登录的页面没登录：站点多半跳到首页或登录页 */
         if (wantLogin && r.status === 200 && s.isLoginPage && s.isLoginPage(r.url)) {
-            var e1 = new Error("要登录（XHR 落到 " + r.url + "）");
+            var e1 = new Error(tx("要登录（XHR 落到 {0}）", r.url));
             e1.needLogin = true;
             throw e1;
         }
@@ -205,27 +207,27 @@ var Web = (function () {
                 if (wantLogin && s.isLoginPage && s.isLoginPage(w.location.href)) { return "LOGIN"; }
                 return (s.listReady ? s.listReady(d) : d.readyState === "complete") ? d.documentElement.outerHTML : null;
             }, 25000);
-            if (fr.url === "LOGIN") { var e2 = new Error("要登录（框落到登录页）"); e2.needLogin = true; throw e2; }
+            if (fr.url === "LOGIN") { var e2 = new Error(tx("要登录（框落到登录页）")); e2.needLogin = true; throw e2; }
             html = fr.url;
-            if (!html) { throw new Error("取不到列表（" + how + "；框：" + fr.note + "）"); }
+            if (!html) { throw new Error(tx("取不到列表（{0}；框：{1}）", how, fr.note)); }
         } else {
-            throw new Error("翻页 " + (r.status || r.err));
+            throw new Error(tx("翻页 {0}", r.status || r.err));
         }
         var out = s.parseList(html, r.url || at, page, H);
         out.how = how;
         out.ms = performance.now() - t0;
-        if (!out.items.length && wantLogin) { var e3 = new Error("列表是空的（多半是没登录上）"); e3.needLogin = true; throw e3; }
+        if (!out.items.length && wantLogin) { var e3 = new Error(tx("列表是空的（多半是没登录上）")); e3.needLogin = true; throw e3; }
         return out;
     }
 
     /* 登录由站点规则做（各站的表单不一样）；这里只记下它返回的账号编号和名字，不存密码 */
     async function login(url, user, pass) {
         var s = listOf(url) || siteOf(url);
-        if (!s || !s.login) { return { ok: false, msg: "这个站不会登录" }; }
+        if (!s || !s.login) { return { ok: false, msg: tx("这个站不会登录") }; }
         var r;
         try { r = await s.login(user, pass, H); } catch (e) { return { ok: false, msg: errStr(e) }; }
         if (r && r.ok && r.userId) { setAccount(new URL(url).hostname, { userId: String(r.userId), name: r.name || "" }); }
-        return r || { ok: false, msg: "登录没有结果" };
+        return r || { ok: false, msg: tx("登录没有结果") };
     }
 
     function listTitle(url, preview) {
@@ -272,7 +274,7 @@ var Web = (function () {
             frameQ = job.catch(function () {});
             var fr = await job;
             out = fr.url;
-            if (!out) { throw new Error("取不到页面信息（" + why + "；框：" + fr.note + "）"); }
+            if (!out) { throw new Error(tx("取不到页面信息（{0}；框：{1}）", why, fr.note)); }
         }
         m[url] = out;
         var keys = Object.keys(m);
@@ -319,7 +321,7 @@ var Web = (function () {
                 video.play().catch(function () {});
                 return;
             }
-            if (!window.Hls || !Hls.isSupported()) { fail(sess, "这台电视上 hls.js 用不了（没有 MSE？）"); return; }
+            if (!window.Hls || !Hls.isSupported()) { fail(sess, tx("这台电视上 hls.js 用不了（没有 MSE？）")); return; }
             /* 缓冲：电视的 SourceBuffer 小（音频那条 ~8MB，见 CLAUDE.md），往前 30–60 秒、往后留 15 秒 */
             var h = sess.hls = new Hls({
                 startPosition: at > 0 ? at : -1,
@@ -427,7 +429,7 @@ var Web = (function () {
             return new Promise(function (res, rej) {
                 sess.resolve = res;
                 sess.reject = rej;
-                sess.timer = setTimeout(function () { fail(sess, "40 秒没出画面"); }, 40000);
+                sess.timer = setTimeout(function () { fail(sess, tx("40 秒没出画面")); }, 40000);
                 resolve(item.url).then(function (r) {
                     if (S !== sess) { return; }
                     R("解析 " + Math.round(r.ms) + "ms（" + r.how + "）→ " + r.type + " " + host(r.url));
