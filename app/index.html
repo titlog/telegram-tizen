@@ -48,6 +48,7 @@
     <div style="font-size:56px;margin-bottom:30px" data-i18n>登录 Telegram</div>
     <div data-i18n>手机打开 Telegram →<br><b>设置 → 设备 → 关联桌面设备</b><br>扫右边这个码</div>
     <div id="qrstate"></div>
+    <div id="qrnote"></div>
   </div>
   <div id="qr"></div>
   <div id="pwbox"><span data-i18n>这个账号开了两步验证，输入密码后按确认：</span><br><input id="pw" type="password"></div>
@@ -61,6 +62,15 @@
     <div class="lab" data-i18n>账号</div><input id="wl-user" type="text" autocomplete="off">
     <div class="lab" data-i18n>密码</div><input id="wl-pass" type="password">
     <div id="wl-msg"></div>
+  </div>
+</div>
+
+<!-- 账号（accounts.js）：切换、添加、退出 -->
+<div id="acct">
+  <div class="box">
+    <div class="h" data-i18n>账号</div>
+    <div class="sub" data-i18n>这台电视上登录的 Telegram 账号。切换不用重新扫码；每个人的来源、看到哪里各记各的。</div>
+    <div id="acct-list"></div>
   </div>
 </div>
 
@@ -81,6 +91,7 @@
 <script src="js/config.js"></script>
 <script src="js/log.js"></script>
 <script src="js/i18n.js"></script>
+<script src="js/accounts.js"></script>
 <script src="js/tg.bundle.js"></script>
 <script src="js/mp4.js"></script>
 <script src="js/mkv.js"></script>

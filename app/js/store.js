@@ -5,7 +5,9 @@
 var Store = (function () {
     "use strict";
 
-    var PKEY = "tg.progress.v1", SKEY = "tg.lastSource.v1";
+    /* 每人一份的键（accounts.js：第一个账号就是原来的键名，后加的带 @a2 之类）；整台电视共用的直接用键名 */
+    function mine(k) { return typeof Accounts !== "undefined" ? Accounts.scope(k) : k; }
+    var PKEY = mine("tg.progress.v1"), SKEY = mine("tg.lastSource.v1");
 
     function read(k, dflt) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : dflt; } catch (e) { return dflt; } }
     function write(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
@@ -28,7 +30,7 @@ var Store = (function () {
     function getProgress(key) { return progress[key] || null; }
 
     /* 每个来源有几个视频（探测结果，主页左边只列有视频的）：id → {n, at} */
-    var CKEY = "tg.srcCount.v1", counts = read(CKEY, {});
+    var CKEY = mine("tg.srcCount.v1"), counts = read(CKEY, {});
     function srcCount(id) { return counts[id] || null; }
     function setSrcCount(id, n) { counts[id] = { n: n, at: Date.now() }; write(CKEY, counts); }
 
@@ -43,7 +45,7 @@ var Store = (function () {
     function markNoFrame(key) { noF[key] = Date.now(); write(FKEY, noF); }
 
     /* 每部片子自己的选择：音轨、字幕、字幕时间偏移（秒）。fileKey → {audio, sub, off, at}，留最近 300 部 */
-    var PRKEY = "tg.prefs.v1", prefs = read(PRKEY, {});
+    var PRKEY = mine("tg.prefs.v1"), prefs = read(PRKEY, {});
     function getPrefs(key) { return prefs[key] || {}; }
     function setPrefs(key, patch) {
         if (!key) { return; }
@@ -74,7 +76,7 @@ var Store = (function () {
     }
 
     /* 搜过的词（遥控器上打字慢，最便宜的搜索是已经打过的那个 —— bilibili 项目的经验），最近的在前，留 12 个 */
-    var QKEY = "tg.searches.v1";
+    var QKEY = mine("tg.searches.v1");
     function searches() { return read(QKEY, []); }
     function addSearch(q) {
         var list = searches().filter(function (x) { return x !== q; });
@@ -82,12 +84,20 @@ var Store = (function () {
         write(QKEY, list.slice(0, 12));
     }
 
+    /* 重新加载页面之后要说的一句话（切换账号之后「已切换到 …」）：Store.once(msg) 存，Store.once() 取出来并清掉 */
+    function once(msg) {
+        if (msg !== undefined) { write("tg.once.v1", msg); return; }
+        var m = read("tg.once.v1", "");
+        try { localStorage.removeItem("tg.once.v1"); } catch (e) {}
+        return m;
+    }
+
     function lastSource() { return read(SKEY, null); }
     function setLastSource(src) { write(SKEY, { id: src.id, title: src.title, kind: src.kind, url: src.url }); }
 
     /* 网页列表当来源（web.js）：群里发的列表链接。按发在哪个群分组存 —— 每次打开那个群就用这次找到的替换掉，
      * 群里删了那条消息，来源栏里也就没了。group id → [{id, title, kind: "web", url}] */
-    var WKEY = "tg.webSources.v1", webSrc = read(WKEY, {});
+    var WKEY = mine("tg.webSources.v1"), webSrc = read(WKEY, {});
     function webSources() {
         var out = [], seen = {};
         Object.keys(webSrc).forEach(function (g) { webSrc[g].forEach(function (s) { if (!seen[s.id]) { seen[s.id] = true; out.push(s); } }); });
@@ -155,5 +165,5 @@ var Store = (function () {
         return put("cover", key, v, 800);    // 缩略图 20–40KB，800 张 ~30MB
     }
 
-    return { setProgress: setProgress, getProgress: getProgress, srcCount: srcCount, setSrcCount: setSrcCount, noPoster: noPoster, markNoPoster: markNoPoster, noFrame: noFrame, markNoFrame: markNoFrame, lastSource: lastSource, setLastSource: setLastSource, getPrefs: getPrefs, setPrefs: setPrefs, dur: dur, setDur: setDur, searches: searches, addSearch: addSearch, webSources: webSources, setWebSources: setWebSources, webSourceGroups: webSourceGroups, getMoov: getMoov, putMoov: putMoov, getCover: getCover, putCover: putCover };
+    return { setProgress: setProgress, getProgress: getProgress, srcCount: srcCount, setSrcCount: setSrcCount, noPoster: noPoster, markNoPoster: markNoPoster, noFrame: noFrame, markNoFrame: markNoFrame, lastSource: lastSource, setLastSource: setLastSource, once: once, getPrefs: getPrefs, setPrefs: setPrefs, dur: dur, setDur: setDur, searches: searches, addSearch: addSearch, webSources: webSources, setWebSources: setWebSources, webSourceGroups: webSourceGroups, getMoov: getMoov, putMoov: putMoov, getCover: getCover, putCover: putCover };
 })();

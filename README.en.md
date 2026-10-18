@@ -64,6 +64,8 @@ the TV. Everything Telegram can play on a phone — MP4s sent as videos, MKVs an
   write yourself in `app/js/sites.local.js` (it is not in the repository); the format is at the top of
   [`app/js/web.js`](app/js/web.js). The repository ships no site rules.
 - Switch to another app and back, and it reconnects on its own.
+- **Several accounts on one TV**: the Account entry in the source list adds accounts (by QR code), switches between
+  them without scanning again, and signs them out. Everyone's sources and progress are kept separately.
 
 Subtitles turn on by themselves only when the dialogue is not in the interface language **and** a subtitle track or
 file in that language exists — with the English interface, an English subtitle for a film in another language;
@@ -75,13 +77,14 @@ part inside the brackets as the title.
 | Where | Button | Does |
 |---|---|---|
 | Grid | arrows, OK | move, play |
-| Grid | Left on the first column | open the source list (Search is its first entry; Sign out and the language switch are at the bottom) |
+| Grid | Left on the first column | open the source list (Search is its first entry; Account and the language switch are at the bottom) |
 | Grid | Back, twice | quit |
 | Player | OK, or Play/Pause | pause / resume |
 | Player | **hold OK** (about 1 s) | menu: audio track, subtitles, subtitle timing, next episode |
 | Player | Left / Right | −/+ 15 s; keep holding and the steps grow to 30 s, 1 min, 2 min, 5 min |
 | Player | Up / Down, or Fast-forward / Rewind | +/− 1 min; holding grows to 2, 5, 10, 15 min |
 | Player | Back | back to the grid (your position is saved) |
+| Source list | Account | switch accounts, add one, or sign the current one out (press OK twice) |
 
 Seeks are applied 0.7 s after you stop pressing, so you can press several times and only download once.
 
@@ -130,7 +133,9 @@ To update: `git pull`, then run `deploy.sh` again. Your session and watch histor
 
 ## Accounts and privacy
 
-- You sign in by QR code; the session is stored in the TV's IndexedDB and goes through no other server.
+- You sign in by QR code; the session is stored in the TV's IndexedDB and goes through no other server. Each account
+  has its own database. Switching accounts needs no password — anyone holding the remote can switch. Signing an
+  account out ends that session on Telegram's side and deletes that person's records from the TV.
 - The API ID and hash are your own and only go into your own package.
 - The deploy script writes **your computer's LAN address** into the package as the destination for diagnostic
   logs; nothing is received unless you are running the collector on that computer.
@@ -168,6 +173,7 @@ Every measurement, pitfall and design decision is in [`CLAUDE.md`](CLAUDE.md) (C
 app/              the client (no build step; mtcute is bundled into js/tg.bundle.js by deploy.sh)
   js/app.js         screens and remote keys: sign-in, grid, player, menu, next episode, search
   js/i18n.js        interface language: English / Chinese
+  js/accounts.js    several accounts: one session database each, per-person local records
   js/tg.js          the Telegram layer: chats, videos (sent as videos and as files), search, subtitle files
   js/player.js      MSE playback engine
   js/mp4.js         progressive MP4 → fragmented MP4

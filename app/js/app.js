@@ -50,6 +50,8 @@
 
     async function boot() {
         var t0 = performance.now();
+        var dropped = await Accounts.cleanup();
+        if (dropped.length) { R("退出的账号留下的库：" + dropped.join("，")); }
         try {
             await TG.init();
         } catch (e) {
@@ -62,8 +64,25 @@
             return;
         }
         R("连上 Telegram " + Math.round(performance.now() - t0) + "ms，mtcute 在 " + TG.mode() + "；界面 " + I18n.lang + "（" + I18n.why + "，系统语言 " + I18n.sys + "）");
-        var me = await TG.me();
-        if (!me) { await login(); }
+        var acct = Accounts.active(), me = await TG.me();
+        if (!me) { await login(); me = await TG.me(); }
+        /* 认人的判据是 Telegram 答的用户编号，不是「认不认得出一个人」（bilibili 那边就是这么漏过去的）；名字也只从这里来 */
+        var verdict = Accounts.describe(acct.id, me);
+        var dup = Accounts.duplicateOf(acct.id);
+        if (dup) {
+            /* 添加账号时扫的是已经在电视上的那个人：新会话作废、这一行拿掉，切到原来那一行 */
+            R("添加的账号 " + acct.id + " 和 " + dup.id + " 是同一个人（id=" + dup.userId + "），作废新会话，切回去");
+            await TG.logout();
+            Accounts.remove(acct.id);
+            Accounts.switchTo(dup.id);
+            Store.once(T("这个账号已经在这台电视上了，切到了它"));
+            location.reload();
+            return;
+        }
+        R("账号：" + Accounts.list().length + " 个，当前 " + acct.id + "（库 " + acct.storage + "，" + acct.name + " id=" + acct.userId + "），Telegram 答的是 id=" +
+          (me && me.id) + " —— " + verdict);
+        var once = Store.once();
+        if (once) { toast(once, 4000); }
         S.screen = "home";
         $("home").classList.remove("hide");
         /* 不要收藏夹（用户 2026-10-01：习惯用自己建的一个群）。上次的来源直接开；第一次用就等探测到第一个有视频的。 */
@@ -143,6 +162,9 @@
         S.screen = "login";
         $("home").classList.add("hide");
         $("panel").classList.add("on");
+        /* 电视上还有别的账号：说清楚这是在添加账号（还是这个账号的会话没了要重扫），按返回能回去 */
+        var a = Accounts.active(), others = Accounts.list().length > 1;
+        $("qrnote").textContent = !others ? "" : !a.userId ? T("添加账号：用另一个 Telegram 账号扫码 · 按返回键取消") : T("{0} 要重新扫码登录 · 按返回键换别的账号", a.name);
         var n = 0;
         await TG.login(function (url) {
             n++;
@@ -180,7 +202,8 @@
     /* 来源栏最上面是「搜索」，最下面是「退出登录」、换界面语言。换语言那一项用要换成的那种语言写（看不懂当前语言的人也认得出） */
     function railItems() {
         var sx = { id: "__search", title: S.src && S.src.kind === "search" ? T("搜索：{0}", S.src.query) : T("搜索"), kind: "" };
-        return [sx].concat(S.sources, [{ id: "__logout", title: T("退出登录"), kind: "" },
+        var a = Accounts.active();
+        return [sx].concat(S.sources, [{ id: "__acct", title: a.name ? T("账号：{0}", a.name) : T("账号"), kind: "" },
                                        { id: "__lang", title: I18n.lang === "en" ? "中文界面" : "English", kind: "" }]);
     }
 
@@ -349,6 +372,67 @@
     }
     function drawRecent() {
         document.querySelectorAll("#sx-recent .q").forEach(function (el, i) { el.classList.toggle("focus", i === S.sx.focus); });
+    }
+
+    /* ---------- 账号（accounts.js）：切换、添加、退出 ---------- */
+
+    S.acct = { focus: 0, rows: [], outAt: 0 };
+    function acctName(a, i) { return a.name || T("账号 {0}", i + 1); }
+    function openAcct() {
+        S.screen = "acct";
+        var cur = Accounts.active(), rows = [];
+        Accounts.list().forEach(function (a, i) {
+            rows.push({ label: acctName(a, i), ck: a.id === cur.id, act: function () { switchAcct(a); } });
+        });
+        rows.push({ label: T("+ 添加账号"), sep: true, act: addAcct });
+        rows.push({ label: T("退出 {0}", acctName(cur, Accounts.list().indexOf(cur))), act: signOut });
+        S.acct.rows = rows;
+        S.acct.focus = rows.findIndex(function (r) { return r.ck; });
+        S.acct.outAt = 0;
+        drawAcct();
+        $("acct").classList.add("on");
+    }
+    function drawAcct() {
+        $("acct-list").innerHTML = S.acct.rows.map(function (r, i) {
+            return "<div class='ai" + (r.sep ? " sep" : "") + (i === S.acct.focus ? " focus" : "") + "'><span class='ck'>" + (r.ck ? "✓" : "") + "</span>" + esc(r.label) + "</div>";
+        }).join("");
+    }
+    function closeAcct() { $("acct").classList.remove("on"); S.screen = "home"; }
+    function acctKey(k) {
+        if (k === 10009) { closeAcct(); return; }
+        if (k === 38) { S.acct.focus = Math.max(0, S.acct.focus - 1); }
+        else if (k === 40) { S.acct.focus = Math.min(S.acct.rows.length - 1, S.acct.focus + 1); }
+        else if (k === 13) { S.acct.rows[S.acct.focus].act(); return; }
+        else { return; }
+        drawAcct();
+    }
+    /* 切换 / 添加都是记下新的当前账号、重新加载页面（用它的库起后台线程） */
+    function switchAcct(a) {
+        if (a.id === Accounts.active().id) { closeAcct(); return; }
+        R("切换账号 " + Accounts.active().id + " → " + a.id + "（" + a.name + "）");
+        Accounts.switchTo(a.id);
+        Store.once(T("已切换到 {0}", a.name));
+        location.reload();
+    }
+    function addAcct() {
+        var a = Accounts.add();
+        R("添加账号 " + a.id + "（库 " + a.storage + "），去扫码");
+        location.reload();
+    }
+    /* 退出：按两下。先让 Telegram 作废这个会话（手机上「设备」里那条也没了），再从电视上拿掉这个人的记录 */
+    function signOut() {
+        var cur = Accounts.active();
+        if (Date.now() - S.acct.outAt > 3000) { S.acct.outAt = Date.now(); toast(T("再按一次确认，退出 {0}", acctName(cur, Accounts.list().indexOf(cur)))); return; }
+        R("退出账号 " + cur.id + "（" + cur.name + "）");
+        TG.logout().then(function () { Accounts.remove(cur.id); location.reload(); });
+    }
+    /* 扫码登录时按返回：在添加账号就取消（切回原来的），是哪个账号的会话没了就换到别的账号；电视上只有这一个账号才退出应用 */
+    function leaveLogin() {
+        var a = Accounts.active(), others = Accounts.list().filter(function (x) { return x.id !== a.id && x.userId; });
+        if (!others.length) { exitApp(); return; }
+        if (!a.userId) { R("取消添加账号 " + a.id); Accounts.remove(a.id); }
+        else { R(a.id + "（" + a.name + "）要重新扫码，先换到 " + others[0].id); Accounts.switchTo(others[0].id); }
+        location.reload();
     }
 
     /* ---------- 网页列表当来源（web.js）：群里发的收藏、分类链接 ---------- */
@@ -1294,13 +1378,7 @@
                     location.reload();
                     return;
                 }
-                if (s.id === "__logout") {
-                    if (Date.now() - S.logoutAt < 3000) {
-                        R("退出登录");
-                        TG.logout().then(function () { location.reload(); });
-                    } else { S.logoutAt = Date.now(); toast(T("再按一次确认，退出 Telegram 登录")); }
-                    return;
-                }
+                if (s.id === "__acct") { S.zone = "grid"; renderRail(); updateFocus(); openAcct(); return; }
                 S.zone = "grid";
                 openSource(s);
             }
@@ -1395,7 +1473,8 @@
         if (S.screen === "weblogin") { webLoginKey(k); return; }
         if (S.screen === "search") { searchKey(k); return; }
         if (S.screen === "bootfail") { if (k === 13) { location.reload(); } else if (k === 10009) { exitApp(); } return; }
-        if (S.screen === "login") { if (k === 10009) { exitApp(); } return; }
+        if (S.screen === "login") { if (k === 10009) { leaveLogin(); } return; }
+        if (S.screen === "acct") { acctKey(k); e.preventDefault(); return; }
         if (S.screen === "home") { homeKey(k); e.preventDefault(); }
         else if (S.screen === "player") { playerKey(k); e.preventDefault(); }
     });

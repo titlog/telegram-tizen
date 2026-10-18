@@ -146,6 +146,20 @@ video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; back
 #sx-recent .q { display: inline-block; font-size: 30px; padding: 10px 26px; margin: 0 16px 16px 0; border-radius: 30px; background: #1b2128; color: #c5cad0; }
 #sx-recent .q.focus { background: #2aabee; color: #fff; }
 
+/* 账号 */
+#acct { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: rgba(10, 13, 16, 0.96); display: none; }
+#acct.on { display: block; }
+#acct .box { position: absolute; left: 460px; top: 150px; width: 1000px; }
+#acct .h { font-size: 56px; margin-bottom: 24px; }
+#acct .sub { font-size: 28px; line-height: 1.6; color: #8b939b; margin-bottom: 36px; }
+#acct .ai { font-size: 36px; height: 84px; line-height: 84px; padding: 0 30px; border-radius: 10px; color: #d0d4d8;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#acct .ai .ck { display: inline-block; width: 54px; color: #2aabee; }
+#acct .ai.sep { margin-top: 24px; }
+#acct .ai.focus { background: #2aabee; color: #fff; }
+#acct .ai.focus .ck { color: #fff; }
+#qrnote { color: #f0b429; font-size: 30px; margin-top: 20px; }
+
 /* 网页登录 */
 #wl { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: rgba(10, 13, 16, 0.94); display: none; }
 #wl.on { display: block; }

@@ -71,8 +71,25 @@ var TG = (function () {
     } };
   }
   return {
-    init: async function () {}, mode: function () { return "stub"; }, me: async function () { return { id: 1 }; },
-    login: async function () {}, logout: async function () {},
+    /* 多账号：「我是谁」按当前账号的库答（tg-session-3 故意也是爸爸 —— 添加了一个已经在的账号）。扫码：stub.noscan 不在就 1.5 秒后自动「扫上」 */
+    init: async function () {}, mode: function () { return "stub"; },
+    me: async function () {
+      var USERS = { "tg-session": { id: 101, displayName: "爸爸" }, "tg-session-2": { id: 202, displayName: "妈妈" }, "tg-session-3": { id: 101, displayName: "爸爸" } };
+      var st = Accounts.active().storage, logged = JSON.parse(localStorage.getItem("stub.logged") || '["tg-session"]');
+      return logged.indexOf(st) >= 0 ? USERS[st] : null;
+    },
+    login: function (onUrl) {
+      onUrl("tg://login?token=STUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUB");
+      if (localStorage.getItem("stub.noscan")) { return new Promise(function () {}); }
+      return new Promise(function (resolve) { setTimeout(function () {
+        var logged = JSON.parse(localStorage.getItem("stub.logged") || '["tg-session"]');
+        logged.push(Accounts.active().storage); localStorage.setItem("stub.logged", JSON.stringify(logged)); resolve();
+      }, 1500); });
+    },
+    logout: async function () {
+      var st = Accounts.active().storage, logged = JSON.parse(localStorage.getItem("stub.logged") || '["tg-session"]');
+      localStorage.setItem("stub.logged", JSON.stringify(logged.filter(function (x) { return x !== st; })));
+    },
     videoCount: async function (src) { await new Promise(function (r) { setTimeout(r, 150); }); return src === 3 || src === 4 ? 0 : 5; },
     sources: async function () { return [{ id: "me", title: "Test", kind: "group" }, { id: 1, title: "视频分享群", kind: "group" }, { id: 4, title: "BotFather", kind: "user" },
       { id: 2, title: "一个名字特别长的频道名字特别长的频道", kind: "channel" }, { id: 3, title: "空的群", kind: "group" }]; },
@@ -155,7 +172,9 @@ await page.route('https://videos.example/**', async (route, req) => {
 await page.route('**/app/js/config.js', r => r.fulfill({ contentType: 'text/javascript', body: 'var REPORT_TO=""; var TG_API_ID=1; var TG_API_HASH="x";' }));
 const sleep = (t) => new Promise(r => setTimeout(r, t));
 /* 一下 = keydown + keyup（遥控器也是这样；确认键在松开时才算短按，按住 650ms 是菜单） */
-const ev = (type, c) => page.evaluate(([t, c]) => document.dispatchEvent(new KeyboardEvent(t, { keyCode: c, bubbles: true })), [type, c]);
+/* 按下去页面就重新加载了（切换账号）：松开那一下没有页面可发，不算错 */
+const ev = (type, c) => page.evaluate(([t, c]) => document.dispatchEvent(new KeyboardEvent(t, { keyCode: c, bubbles: true })), [type, c])
+  .catch(e => { if (!/context was destroyed|navigation/i.test(e.message)) throw e; });
 const key = async (code, n = 1) => { for (let i = 0; i < n; i++) { await ev('keydown', code); await sleep(40); await ev('keyup', code); await sleep(80); } };
 const hold = async (code, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { await ev('keydown', code); await sleep(100); } await ev('keyup', code); await sleep(200); };
 /* UILANG=en：英文界面（截图名前面加 en-）。不给就钉成中文 —— Playwright 的 Chromium 系统语言是 en-US，新装的会跟着变英文 */
@@ -306,8 +325,47 @@ await key(10009); await sleep(800);
 
 }
 
+/* ---------- 多账号（ONLY=acct 只跑这一段）：账号页 → 添加（扫码）→ 切回去 → 添加一个已经在的 → 扫码时按返回取消 → 退出一个 ---------- */
+if (!process.env.ONLY || process.env.ONLY === 'acct') {
+  const acctState = () => page.evaluate(() => ({ list: Accounts.list().map(a => a.id + ':' + (a.name || '?') + (a.id === Accounts.active().id ? '*' : '')).join(' '),
+    progress: Object.keys(JSON.parse(localStorage.getItem(Accounts.scope('tg.progress.v1')) || '{}')).length, rail: document.querySelector('#rail-list').textContent.slice(-40) }));
+  const toAcct = async () => { await key(37, 4); await key(40, 30); await key(38); await key(13); await sleep(400); };
+  const acctRows = () => page.evaluate(() => [...document.querySelectorAll('#acct .ai')].map(e => (e.classList.contains('focus') ? '> ' : '  ') + e.textContent));
+  const acctGo = async (pred) => { const r = await acctRows(); const cur = r.findIndex(x => x.startsWith('> ')), want = r.findIndex(pred);
+    await key(want > cur ? 40 : 38, Math.abs(want - cur)); await key(13); };
+  /* 先在第一个账号（爸爸）下看一部，记一条进度 */
+  await page.evaluate(() => Store.setProgress('acct-test', 100, 600, '爸爸看的'));
+  console.log('  多账号 开始：', JSON.stringify(await acctState()));
+  await toAcct();
+  await shot('30-acct');
+  console.log('  账号页：' + (await acctRows()).join(' | '));
+  await acctGo(x => x.includes(L('添加账号', 'Add an account'))); await sleep(5500);
+  console.log('  扫上之后：', JSON.stringify(await acctState()));
+  await shot('32-second');
+  await toAcct();
+  console.log('  账号页：' + (await acctRows()).join(' | '));
+  await acctGo(x => x.includes('爸爸')); await sleep(3500);
+  console.log('  切回爸爸：', JSON.stringify(await acctState()), '提示：' + await txt('#toast'));
+  /* 再添加一个，扫的是已经在的爸爸（stub 里 tg-session-3 答 101） */
+  await toAcct(); await acctGo(x => x.includes(L('添加账号', 'Add an account'))); await sleep(6000);
+  console.log('  添加了已经在的账号：', JSON.stringify(await acctState()), '提示：' + await txt('#toast'));
+  /* 添加时扫码页按返回 = 取消 */
+  await page.evaluate(() => localStorage.setItem('stub.noscan', '1'));
+  await toAcct(); await acctGo(x => x.includes(L('添加账号', 'Add an account'))); await sleep(2000);
+  await shot('31-add-login');
+  console.log('  添加账号扫码页：' + await txt('#qrnote'));
+  await key(10009); await sleep(3000);
+  console.log('  扫码时按返回取消：', JSON.stringify(await acctState()));
+  await page.evaluate(() => localStorage.removeItem('stub.noscan'));
+  /* 切到妈妈、退出妈妈（按两下）→ 回到爸爸，妈妈的库排进待删、下次启动删掉 */
+  await toAcct(); await acctGo(x => x.includes('妈妈')); await sleep(3500);
+  await toAcct(); await acctGo(x => x.includes(L('退出', 'Sign out'))); await sleep(300); await key(13); await sleep(3500);
+  console.log('  退出妈妈之后：', JSON.stringify(await acctState()), '妈妈的进度键还在吗：' +
+    await page.evaluate(() => localStorage.getItem('tg.progress.v1@a2') !== null));
+}
+
 /* ---------- MKV（有生成好的测试片才跑） ---------- */
-if (extra.some(x => x.path.startsWith('mkv/'))) {
+if ((!process.env.ONLY || process.env.ONLY === 'mkv') && extra.some(x => x.path.startsWith('mkv/'))) {
   await search('MKV');
   const n = await page.evaluate(() => document.querySelectorAll('.card').length);
   console.log('  MKV ' + n + ' 个：' + await page.evaluate(() => [...document.querySelectorAll('.card .title')].map(e => e.textContent).join(' / ')));

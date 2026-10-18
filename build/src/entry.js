@@ -19,9 +19,9 @@ const INIT = { deviceModel: 'Samsung TV', systemVersion: 'Tizen', appVersion: '0
  * 后台线程 60 秒收不到就把这条连接作废（mtcute 的 WORKER_HEARTBEAT_TIMEOUT），切回来所有请求都是
  * 「Worker connection expired」（2026-10-02 切去哔哩哔哩 6 分钟再切回来）。后台线程本身还活着、到 Telegram 的连接也在，
  * 它支持同时挂多条连接，所以不用重建线程、不用重新登录。 */
-function createInWorker(apiId, apiHash) {
+function createInWorker(apiId, apiHash, storage) {
   const url = URL.createObjectURL(new Blob(
-    ['self.TG_CFG=' + JSON.stringify({ apiId, apiHash }) + ';\n', workerSrc], { type: 'text/javascript' }));
+    ['self.TG_CFG=' + JSON.stringify({ apiId, apiHash, storage }) + ';\n', workerSrc], { type: 'text/javascript' }));
   const worker = new Worker(url);
   const make = () => new TelegramClient({ client: new TelegramWorkerPort({ worker }) });
   return { client: make(), reconnect: make };
@@ -31,21 +31,22 @@ function createInWorker(apiId, apiHash) {
  * WebAssembly.instantiate(bytes)，拿回的是 {module, instance}，initSync 却当成 Instance 用，
  * 抛「WebAssembly.Module(): Argument 0 must be a buffer source」（mtcute 0.32.3）。
  * 主线程也不能 new WebAssembly.Module 同步编译：Chromium 不许在主线程同步编译 4KB 以上的模块。 */
-async function createDirect(apiId, apiHash) {
+async function createDirect(apiId, apiHash, storage) {
   const module = await WebAssembly.compile(simd ? wasmSimd : wasmPlain);
   return new TelegramClient({
-    apiId, apiHash, storage: 'tg-session',
+    apiId, apiHash, storage: storage || 'tg-session',
     crypto: new WebCryptoProvider({ wasmInput: module }),
     initConnectionOptions: INIT, logLevel: 2,
   });
 }
 
-async function create(apiId, apiHash, mode) {
+/* storage：会话存在哪个 IndexedDB 库里（一个账号一个，见 app/js/accounts.js），不给就是第一个账号的 tg-session */
+async function create(apiId, apiHash, mode, storage) {
   if (mode !== 'direct') {
-    try { const w = createInWorker(apiId, apiHash); return { client: w.client, reconnect: w.reconnect, mode: 'worker' }; }
-    catch (e) { return { client: await createDirect(apiId, apiHash), mode: 'direct（后台线程建不起来：' + (e && e.message) + '）' }; }
+    try { const w = createInWorker(apiId, apiHash, storage); return { client: w.client, reconnect: w.reconnect, mode: 'worker' }; }
+    catch (e) { return { client: await createDirect(apiId, apiHash, storage), mode: 'direct（后台线程建不起来：' + (e && e.message) + '）' }; }
   }
-  return { client: await createDirect(apiId, apiHash), mode: 'direct' };
+  return { client: await createDirect(apiId, apiHash, storage), mode: 'direct' };
 }
 
 function qrSvg(text, cell) {

@@ -62,7 +62,6 @@ var I18n = (function () {
         "私聊": "Chat",
         "网页": "Web",
         "搜索：{0}": "Search: {0}",
-        "退出登录": "Sign out",
         "加载中…": "Loading…",
         "读不到这里的视频：{0}<br>按确认重试": "Couldn't load the videos here: {0}<br>Press OK to retry",
         "搜索出错：{0}<br>按确认重试": "Search failed: {0}<br>Press OK to retry",
@@ -79,7 +78,18 @@ var I18n = (function () {
         "登录成功": "Signed in",
         "登录出错：{0}": "Sign-in error: {0}",
         "再按一次返回键退出": "Press Back again to quit",
-        "再按一次确认，退出 Telegram 登录": "Press OK again to sign out of Telegram",
+        /* 账号 */
+        "账号：{0}": "Account: {0}",
+        "账号 {0}": "Account {0}",
+        "这台电视上登录的 Telegram 账号。切换不用重新扫码；每个人的来源、看到哪里各记各的。":
+            "Telegram accounts signed in on this TV. Switching needs no new scan; everyone's sources and progress are kept separately.",
+        "+ 添加账号": "+ Add an account",
+        "退出 {0}": "Sign out {0}",
+        "再按一次确认，退出 {0}": "Press OK again to sign out {0}",
+        "添加账号：用另一个 Telegram 账号扫码 · 按返回键取消": "Adding an account: scan with another Telegram account · Back to cancel",
+        "{0} 要重新扫码登录 · 按返回键换别的账号": "{0} needs to sign in again · Back for another account",
+        "这个账号已经在这台电视上了，切到了它": "This account is already on this TV — switched to it",
+        "已切换到 {0}": "Switched to {0}",
         "共 {0} 个视频": "{0} videos",
         "（已加载 {0}）": " ({0} loaded)",
 

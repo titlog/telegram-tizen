@@ -11,11 +11,12 @@ app/js/tg.js      Telegram 这一层：来源（群/频道）、来源里的视�
 app/js/player.js  播放引擎：MediaSource + 音视频两个 SourceBuffer，按样本在文件里的位置顺序读、拼 ~1 秒一段；MKV 走 mkv.js 拆块
 app/js/mp4.js     自己写的渐进式 MP4 → fMP4：样本表 TypedArray、二分找关键帧、拼 moof+mdat（替掉了 mp4box）；也认 tx3g 字幕轨
 app/js/mkv.js     自己写的 MKV / WebM：读头和 Cues、按 Cluster 顺序拆块、算解码时间，交给 Mp4.fragmentFrames
+app/js/accounts.js  多账号：每个账号一个会话库（tg-session、tg-session-2…），每人一份的本地记录（scope），切换 = 重新加载
 app/js/i18n.js    界面语言：中文原句当键查英文（T("…")），跟系统语言、来源栏最下面切换
 app/js/subs.js    字幕：外挂文件（SRT/ASS/VTT，GBK/Big5 自动认）、tx3g、MKV 的文字和 PGS 图形字幕、画到屏幕上
 app/js/web.js     网页链接：按站点规则解析出视频地址（XHR，不行就隐藏框）、hls.js 放（vendor/hls.min.js）；列表页当来源、翻页、登录查账号编号
 app/js/sites.local.js  站点规则（Web.register），本机自己写，不进仓库
-app/js/store.js   本地：看到哪里（localStorage）、上次的来源、moov 缓存（IndexedDB，留 12 个）
+app/js/store.js   本地：看到哪里（localStorage，按账号分开）、上次的来源、moov 缓存（IndexedDB，留 12 个，整台电视共用）
 build/src/        mtcute 打包：worker.js（后台线程里的客户端）先打成文本，嵌进 entry.js（主线程的端口 + 二维码）
 tools/deploy.sh   打包、写入上报地址和凭证、签名、安装、启动；打完包把凭证改回空值
 tools/collect.mjs 日志收集，:8097（抖音 :8098、bilibili :8099）
@@ -41,7 +42,7 @@ node test/check-mkv.mjs test/media/mkv/*.mkv test/media/mkv/*.webm   # 改 mkv.j
 node test/check-subs.mjs                         # 改 subs.js 之后
 node test/i18n.mjs                               # 改了界面上的字之后
 node test/serve.mjs & node test/run.mjs media/a_h264_fast.mp4 "media/b_h264_moovend.mp4?start=30"   # 改 player.js 之后
-node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv 只跑最后 MKV 那段）
+node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv / ONLY=acct 只跑那一段，UILANG=en 英文界面）
 ```
 
 ## 可行性探测的结果（2026-10-01 设备实测，参考机同 bilibili / 抖音那台）
@@ -240,4 +241,24 @@ PGS 一个显示集几 KB 到几十 KB、蓝光 remux 常带四五条：定下�
 - README.en.md 的截图是英文界面（`UILANG=en node test/readme-shots.mjs` → `docs/screenshots/en-*.jpg`）。
 - 电视上（10-18 14:17）：系统语言报的是 `en-GB`，按「升级前就在用」定成了中文 —— 没有这条，用户这台升级后就是英文界面。
   用户说切换试过没问题，但日志里没有「界面语言 zh → en」那一行，**切换这一步当作还没在电视上验证**。
+
+## 多账号（2026-10-18，照 bilibili 客户端）
+
+用户问「能做多用户登录吗？就像 bilibili」，按建议做：看到哪里按人分开、切换不要密码。
+- **为什么比 bilibili 简单**：bilibili 那边浏览器只有一个全局 cookie 坑位，第二个人扫码之后请求还穿着第一个人的衣服（那边 CLAUDE.md「一台电视，好几个人」）。
+  这边每个账号的会话是 mtcute 的一个 IndexedDB 库（库名就是 storage 名：第一个账号沿用原来的 `tg-session`，后加的 `tg-session-2`、`-3`…，编号不复用），
+  各自一份授权密钥，没有共享的坑位。同一时间只开一个：切换 = 记下当前账号、`location.reload()`，用它的库起后台线程。
+- **每人一份**（`Accounts.scope(key)`）：看到哪里、上次的来源、来源栏、搜过的词、每部片子的音轨字幕选择、网页登录查到的账号编号。
+  **第一个账号（a1）沿用升级前的键名**，后加的带 `@a2`；升级不用搬数据。整台电视共用：封面、moov / MKV 头缓存、片子时长、界面语言、维基没找到海报的记录。
+- **认人看用户编号**（bilibili 的教训：别只看「认不认得出一个人」）：每次启动 getMe，和这一行记的 userId 比，日志
+  `账号：N 个，当前 a2（库 tg-session-2，… id=…），Telegram 答的是 id=… —— 对上了`。已有 userId 的行对不上就不改名字。
+- **添加时扫的是已经在的账号**：新会话作废（logOut）、这一行拿掉、切回原来那一行，提示「这个账号已经在这台电视上了」。
+- **扫码页按返回**：在添加账号 → 取消、切回原来的；是某个账号的会话没了要重扫 → 先换到别的账号；电视上只有这一个账号才退出应用。
+- **退出一个账号**（账号页最后一项，按两下）：先 logOut（手机上「设备」里那条也没了），再删这个人的本地记录；他的库**下次启动才删**
+  —— 退出那一刻后台线程还开着它，`deleteDatabase` 会被挡住。待删的库名记在 `tg.accounts.v1` 的 drop 里。
+- 界面：来源栏倒数第二项「账号：名字」→ 账号页（各账号、+ 添加账号、退出 当前的）。切换之后的提示（「已切换到 …」）跨过重新加载，用 `Store.once`。
+- 桌面测试（`ONLY=acct`）：假 Telegram 层按当前账号的库答「我是谁」（tg-session-3 故意答成第一个人），走一遍添加 → 切回 → 添加已经在的 → 扫码时按返回 →
+  退出：进度按人分开（1 / 0 / 1），退出的人的进度键删了、库下次启动删了。踩了一下：按下确认就重新加载页面，测试里松开那一下没有页面可发，按键工具要容忍。
+- 电视上（10-18 14:37）：升级上去原来的会话就是 a1，getMe 对上，不用重新扫码，启动到主页 2.4 秒。添加第二个账号、切换、退出：用户 14:38 说试过没问题，
+  但日志里没有「添加账号」「切换账号」「账号：2 个」这些行 —— **当作还没在电视上验证**。
 

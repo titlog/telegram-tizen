@@ -141,7 +141,7 @@ var Web = (function () {
     /* ---------- 列表 ---------- */
 
     /* 登录过的站：host → {userId, name}。只存编号和名字，不存密码 */
-    var AKEY = "tg.webAccount.v1";
+    var AKEY = typeof Accounts !== "undefined" ? Accounts.scope("tg.webAccount.v1") : "tg.webAccount.v1";     // 每个 Telegram 账号各记各的
     function accounts() { try { return JSON.parse(localStorage.getItem(AKEY) || "{}"); } catch (e) { return {}; } }
     function setAccount(host, a) { var m = accounts(); m[host] = a; try { localStorage.setItem(AKEY, JSON.stringify(m)); } catch (e) {} }
 
