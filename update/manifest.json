@@ -1,0 +1,4 @@
+{
+ "manifest": "{\"version\":\"1.1.0\",\"shell\":1,\"sha256\":\"13a8379cf49416055a236baf8506aaef9a9ff2a216a30723b95e9920b2d549e9\",\"size\":429711,\"date\":\"2026-10-21T20:16:39.651Z\",\"urls\":[\"https://cdn.jsdelivr.net/gh/titlog/telegram-tizen@v1.1.0/update/bundle-1.1.0.json\",\"https://raw.githubusercontent.com/titlog/telegram-tizen/v1.1.0/update/bundle-1.1.0.json\"]}",
+ "sig": "4ha8tWiJ8iNGqwXGFF+GIrOSmjSrO4jabYaKlDvUsT+E4PN0NgeMCRXgICfSCYib4yflbvNTYROv1pSUYMwg3Q=="
+}
