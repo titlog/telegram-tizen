@@ -87,6 +87,17 @@
   </div>
 </div>
 
+<!-- 设置（app.js 的 openOpts）：诊断日志、自动更新，属于这台电视 -->
+<div id="opts">
+  <div class="box">
+    <div class="h" data-i18n>设置</div>
+    <div id="opts-list"></div>
+    <div class="st" id="opts-diag"></div>
+    <div class="st" id="opts-update"></div>
+    <div class="sub" data-i18n>诊断日志：出问题时（连不上、读不到、放不了），应用会把排查需要的运行信息传给开发者，不会泄露个人隐私。到 GitHub 报问题时附上这台电视的编号。<br>自动更新：新版本从这个项目的 GitHub 仓库下载，带签名，验过才用，下次打开生效；新版本启动不起来会自动退回装的这一版。</div>
+  </div>
+</div>
+
 <!-- 搜索 -->
 <div id="sx">
   <div class="box">
@@ -101,23 +112,9 @@
 <div id="toast"></div>
 <div id="lines"></div>
 
+<!-- 只有两个标签。其余由 boot.js 写：安装包自己的脚本，或者自动更新下载、验过签名的新版本（它的 SCRIPTS 才是现在的加载顺序，
+     新加的文件加在那里，不是这里）。config.js 留在外面：deploy.sh / release.sh 改写它，更新永远不带它。 -->
 <script src="js/config.js"></script>
-<script src="js/log.js"></script>
-<script src="js/i18n.js"></script>
-<script src="js/accounts.js"></script>
-<script src="js/apikey.js"></script>
-<script src="js/tg.bundle.js"></script>
-<script src="js/mp4.js"></script>
-<script src="js/mkv.js"></script>
-<script src="js/player.js"></script>
-<script src="js/vendor/hls.min.js"></script>
-<script src="js/web.js"></script>
-<!-- 站点规则（Web.register）：本机自己写，不进仓库，见 web.js 开头。没有这个文件时这一行什么都不做 -->
-<script src="js/sites.local.js"></script>
-<script src="js/tg.js"></script>
-<script src="js/store.js"></script>
-<script src="js/cover.js"></script>
-<script src="js/subs.js"></script>
-<script src="js/app.js"></script>
+<script src="js/boot.js"></script>
 </body>
 </html>

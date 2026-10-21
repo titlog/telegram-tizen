@@ -56,6 +56,9 @@ const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, lo
 const errors = [], logs = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { const t = m.text(); if (/^app:/.test(t)) logs.push(t); });
+/* 应用自己会往外连的两处：诊断日志的接收端（地址从 diag.js 读）、自动更新查的 GitHub / jsDelivr —— 测试里一律拦掉，不往线上传东西 */
+const OUTSIDE = [new URL(/var ENDPOINT = "([^"]+)"/.exec(fs.readFileSync(ROOT + 'app/js/diag.js', 'utf8'))[1]).host, 'raw.githubusercontent.com', 'cdn.jsdelivr.net'];
+await page.route((u) => OUTSIDE.includes(u.host), (r) => r.abort());
 let cfg = '';
 await page.route('**/js/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: cfg }));
 await page.route('**/js/tg.js', (r) => r.fulfill({ contentType: 'text/javascript', body: stub }));

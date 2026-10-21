@@ -117,6 +117,9 @@ page.on('console', m => { const t = m.text(); if (/^(app|player|web|onerror|csp)
 let thumbCalls = 0;
 await page.exposeFunction('__thumbCall', () => { thumbCalls++; });
 page.on('pageerror', e => console.log('  pageerror ' + e.message));
+/* 应用自己会往外连的两处：诊断日志的接收端（地址从 diag.js 读）、自动更新查的 GitHub / jsDelivr —— 测试里一律拦掉，不往线上传东西 */
+const OUTSIDE = [new URL(/var ENDPOINT = "([^"]+)"/.exec(fs.readFileSync(ROOT + 'app/js/diag.js', 'utf8'))[1]).host, 'raw.githubusercontent.com', 'cdn.jsdelivr.net'];
+await page.route((u) => OUTSIDE.includes(u.host), (r) => r.abort());
 await page.route('**/app/js/tg.js', r => r.fulfill({ contentType: 'text/javascript', body: stub }));
 /* 假的网站 videos.example，和它的站点规则（换掉本机的 js/sites.local.js，测试不依赖本机写了哪些站）：
  * /login 收 test / pw、回账号编号 7；要登录的 /my/favourites/ 登录后改读公开的 /members/7/favourites/，两页（24 + 6）；
@@ -329,7 +332,13 @@ await key(10009); await sleep(800);
 if (!process.env.ONLY || process.env.ONLY === 'acct') {
   const acctState = () => page.evaluate(() => ({ list: Accounts.list().map(a => a.id + ':' + (a.name || '?') + (a.id === Accounts.active().id ? '*' : '')).join(' '),
     progress: Object.keys(JSON.parse(localStorage.getItem(Accounts.scope('tg.progress.v1')) || '{}')).length, rail: document.querySelector('#rail-list').textContent.slice(-40) }));
-  const toAcct = async () => { await key(37, 4); await key(40, 30); await key(38); await key(13); await sleep(400); };
+  /* 来源栏最底下几项是「账号 · 设置 · 换语言」：按文字找，不按位置（加「设置」那天位置变了，这一步跑去开了设置页） */
+  const toRail = async (re) => {
+    await key(37, 4); await key(40, 30);
+    for (let i = 0; i < 6 && !re.test(await txt('#rail-list .src.focus') || ''); i++) await key(38);
+    await key(13); await sleep(400);
+  };
+  const toAcct = () => toRail(/^(账号|Account)/);
   const acctRows = () => page.evaluate(() => [...document.querySelectorAll('#acct .ai')].map(e => (e.classList.contains('focus') ? '> ' : '  ') + e.textContent));
   const acctGo = async (pred) => { const r = await acctRows(); const cur = r.findIndex(x => x.startsWith('> ')), want = r.findIndex(pred);
     await key(want > cur ? 40 : 38, Math.abs(want - cur)); await key(13); };
@@ -362,6 +371,21 @@ if (!process.env.ONLY || process.env.ONLY === 'acct') {
   await toAcct(); await acctGo(x => x.includes(L('退出', 'Sign out'))); await sleep(300); await key(13); await sleep(3500);
   console.log('  退出妈妈之后：', JSON.stringify(await acctState()), '妈妈的进度键还在吗：' +
     await page.evaluate(() => localStorage.getItem('tg.progress.v1@a2') !== null));
+
+  /* 设置：诊断日志开关、上传（测试里接收端被拦掉 → 写「没传上」）、检查更新（GitHub 也被拦掉 → 「没查成」），返回键回主页 */
+  const optsRows = () => page.evaluate(() => [...document.querySelectorAll('#opts .ai')].map(e => (e.classList.contains('focus') ? '> ' : '  ') + e.textContent));
+  await toRail(/^(设置|Settings)$/);
+  console.log('  设置页：' + (await optsRows()).join(' | ') + ' || ' + await txt('#opts-diag') + ' || ' + await txt('#opts-update'));
+  await shot('33-opts');
+  await key(13); await sleep(300);
+  console.log('  关掉之后：' + (await optsRows())[0] + ' || ' + await txt('#opts-diag'));
+  await key(13); await sleep(300);
+  await key(40); await key(13); await sleep(2500);
+  console.log('  按了上传：' + await txt('#opts-diag'));
+  await key(40); await key(13); await sleep(2500);
+  console.log('  按了检查更新：' + await txt('#opts-update'));
+  await key(10009); await sleep(400);
+  console.log('  返回之后：' + await page.evaluate(() => window.__app.screen()));
 }
 
 /* ---------- MKV（有生成好的测试片才跑） ---------- */

@@ -66,6 +66,11 @@ the TV. Everything Telegram can play on a phone — MP4s sent as videos, MKVs an
 - Switch to another app and back, and it reconnects on its own.
 - **Several accounts on one TV**: the Account entry in the source list adds accounts (by QR code), switches between
   them without scanning again, and signs them out. Everyone's sources and progress are kept separately.
+- **Self-update** (from 1.1.0): a newer signed version is downloaded in the background while the app is open and runs
+  from the next launch, with an "Updated to x.y.z" notice.
+- **Diagnostic logs** (from 1.1.0): when something goes wrong, the app sends the developer the information needed to
+  find out why, and nothing that identifies you. It can be switched off under Settings in the source list; when
+  reporting a problem, quote the TV's code shown there.
 
 Subtitles turn on by themselves only when the dialogue is not in the interface language **and** a subtitle track or
 file in that language exists — with the English interface, an English subtitle for a film in another language;
@@ -108,7 +113,7 @@ that the app opens from the TV like any other. Two ways:
 |---|---|---|
 | For | just watching on the TV | changing the code, reading the diagnostic logs |
 | Needs | a computer (Windows / macOS / Linux) **or an Android phone** with [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung) | macOS, Node, the Tizen Studio command-line tools, and a Telegram API ID of your own |
-| Updating | install the newer `.wgt` the same way; the sign-in and watch history are kept | `git pull`, then `deploy.sh` again |
+| Updating | **updates itself from 1.1.0**; on 1.0.0 install the newer `.wgt` once more (the sign-in and watch history are kept) | `git pull`, then `deploy.sh` again |
 
 **Both start with this:** enable Developer Mode on the TV — on the Apps screen type `12345` on the remote, switch it on,
 set Host PC IP to the computer or phone you install from — then **power-cycle the set** (unplug it). Samsung TVs from
@@ -205,6 +210,9 @@ app/              the client (no build step; mtcute is bundled into js/tg.bundle
   js/i18n.js        interface language: English / Chinese
   js/accounts.js    several accounts: one session database each, per-person local records
   js/apikey.js      which Telegram API ID to use: the one the package ships with, or one entered on the TV
+  js/boot.js        which code this launch runs: the package's, or a newer signed version downloaded by the self-update
+  js/update.js      self-update: check, download, verify the signature
+  js/diag.js        diagnostic logs: an identity-scrubbed ring, sent to the developer when something goes wrong or by hand
   js/tg.js          the Telegram layer: chats, videos (sent as videos and as files), search, subtitle files
   js/player.js      MSE playback engine
   js/mp4.js         progressive MP4 → fragmented MP4
@@ -215,7 +223,8 @@ app/              the client (no build step; mtcute is bundled into js/tg.bundle
 build/            mtcute's bundle entry points (worker and main thread)
 spike/            feasibility probes and engine measurements, not packaged
 test/             desktop tests
-tools/            deploy, release package (release.sh), log collector
+tools/            deploy, release package (release.sh), self-update (update-*.mjs), log collector
+update/           the self-update's signed manifest and bundle
 CLAUDE.md         findings, pitfalls, and how to debug on a retail set
 ```
 

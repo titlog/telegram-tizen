@@ -17,6 +17,8 @@
         playing: null, pending: null, pendTimer: 0, ovTimer: 0, backAt: 0, logoutAt: 0
     };
     function R(s) { Log.report("app", s); }
+    /* 诊断日志（diag.js）：先记一行「新的一次启动」，之后每一行日志都进那一圈 */
+    Diag.init({ report: Log.report });
     I18n.apply();
     function errStr(e) { return (e && (e.message || e.text || e.name)) || String(e); }
 
@@ -63,6 +65,7 @@
             await TG.init();
         } catch (e) {
             R("连不上 Telegram：" + errStr(e));
+            Diag.incident("连不上 Telegram：" + errStr(e));
             $("home").classList.add("hide");
             $("panel").classList.add("on");
             $("how").innerHTML = "<div style='font-size:48px'>" + T("连不上 Telegram") + "</div><div style='font-size:30px;color:#999;margin-top:20px'>" +
@@ -80,6 +83,8 @@
                  * 包里带的（被停用了）→ 空着的填写页，填自己申请的。填好了重新来过 */
                 if (!ApiKey.rejected(e)) { throw e; }
                 R("Telegram 不认" + (api.from === "tv" ? "电视上填的" : "安装包里带的") + " API ID / Hash：" + errStr(e) + "，转到填写页");
+                /* 安装包带的那组被拒是所有人的事（多半是被 Telegram 停了）；电视上填错的是这一台的事 */
+                if (api.from === "build") { Diag.incident("安装包带的 API ID 被 Telegram 拒了：" + errStr(e)); }
                 $("panel").classList.remove("on");
                 var why = e.text || errStr(e);
                 await askApi(api.from === "tv" ? T("Telegram 不认这组 API ID / Hash（{0}）。对着 my.telegram.org 核对一下再填。", why) :
@@ -94,7 +99,7 @@
         var dup = Accounts.duplicateOf(acct.id);
         if (dup) {
             /* 添加账号时扫的是已经在电视上的那个人：新会话作废、这一行拿掉，切到原来那一行 */
-            R("添加的账号 " + acct.id + " 和 " + dup.id + " 是同一个人（id=" + dup.userId + "），作废新会话，切回去");
+            R("添加的账号 " + acct.id + " 和 " + dup.id + " 是同一个人（id=" + Diag.priv(dup.userId) + "），作废新会话，切回去");
             await TG.logout();
             Accounts.remove(acct.id);
             Accounts.switchTo(dup.id);
@@ -102,8 +107,8 @@
             location.reload();
             return;
         }
-        R("账号：" + Accounts.list().length + " 个，当前 " + acct.id + "（库 " + acct.storage + "，" + acct.name + " id=" + acct.userId + "），Telegram 答的是 id=" +
-          (me && me.id) + " —— " + verdict);
+        R("账号：" + Accounts.list().length + " 个，当前 " + acct.id + "（库 " + acct.storage + "，" + Diag.priv(acct.name) + " id=" + Diag.priv(acct.userId) + "），Telegram 答的是 id=" +
+          Diag.priv((me && me.id)) + " —— " + verdict);
         var once = Store.once();
         if (once) { toast(once, 4000); }
         S.screen = "home";
@@ -115,7 +120,7 @@
             S.sources = [last];
             renderRail();
             await openSource(last, { quiet: true });
-            R("启动到主页 " + Math.round(performance.now() - t0) + "ms，来源「" + S.src.title + "」" + S.items.length + " 个视频");
+            R("启动到主页 " + Math.round(performance.now() - t0) + "ms，来源「" + Diag.priv(S.src.title) + "」" + S.items.length + " 个视频");
         } else {
             $("empty").innerHTML = T("正在找有视频的群和频道…");
         }
@@ -288,6 +293,7 @@
         var sx = { id: "__search", title: S.src && S.src.kind === "search" ? T("搜索：{0}", S.src.query) : T("搜索"), kind: "" };
         var a = Accounts.active();
         return [sx].concat(S.sources, [{ id: "__acct", title: a.name ? T("账号：{0}", a.name) : T("账号"), kind: "" },
+                                       { id: "__opts", title: T("设置"), kind: "" },
                                        { id: "__lang", title: I18n.lang === "en" ? "中文界面" : "English", kind: "" }]);
     }
 
@@ -318,16 +324,17 @@
         if (src.kind === "web") { return openWebList(S.src, g, t0, opts || {}); }
         if (src.kind === "search") { return openSearch(S.src, g, t0); }
         /* 群里发的网站链接（web.js）跟视频混在一起按时间排。只取最近 40 条带链接的消息，翻页只翻视频 */
-        var linksP = TG.links(src.id, 40).catch(function (e) { R("来源「" + src.title + "」取链接出错 " + errStr(e)); return []; });
+        var linksP = TG.links(src.id, 40).catch(function (e) { R("来源「" + Diag.priv(src.title) + "」取链接出错 " + errStr(e)); return []; });
         try {
             page = await TG.videos(src.id, undefined, 40);
             links = await linksP;
         } catch (e) {
             if (g !== S.gen) { return; }
             S.loading = false;
-            R("来源「" + src.title + "」出错 " + errStr(e));
+            R("来源「" + Diag.priv(src.title) + "」出错 " + errStr(e));
             $("src-sub").textContent = "";
             $("empty").innerHTML = T("读不到这里的视频：{0}<br>按确认重试", esc(errStr(e)));
+            Diag.incident("读不到来源里的视频：" + errStr(e));
             return;
         }
         if (g !== S.gen) { return; }
@@ -344,7 +351,7 @@
             if (p && p.at > at) { at = p.at; best = i; }
         });
         S.focus = best >= 0 ? best : 0;
-        R("来源「" + src.title + "」" + Math.round(performance.now() - t0) + "ms，" + S.items.length + "/" + S.total + " 个视频" + (links.length ? "（其中网页链接 " + links.length + " 个）" : ""));
+        R("来源「" + Diag.priv(src.title) + "」" + Math.round(performance.now() - t0) + "ms，" + S.items.length + "/" + S.total + " 个视频" + (links.length ? "（其中网页链接 " + links.length + " 个）" : ""));
         renderGrid();
     }
 
@@ -393,8 +400,9 @@
         catch (e) {
             if (g !== S.gen) { return; }
             S.loading = false;
-            R("搜索「" + src.query + "」出错 " + errStr(e));
+            R("搜索「" + Diag.priv(src.query) + "」出错 " + errStr(e));
             $("empty").innerHTML = T("搜索出错：{0}<br>按确认重试", esc(errStr(e)));
+            Diag.incident("搜索出错：" + errStr(e));
             return;
         }
         if (g !== S.gen) { return; }
@@ -402,7 +410,7 @@
         S.items = withDur(page.items);
         S.next = page.next;
         S.total = page.total;
-        R("搜索「" + src.query + "」" + Math.round(performance.now() - t0) + "ms，" + S.items.length + " 个" + (page.next ? "，还有" : ""));
+        R("搜索「" + Diag.priv(src.query) + "」" + Math.round(performance.now() - t0) + "ms，" + S.items.length + " 个" + (page.next ? "，还有" : ""));
         renderGrid();
         if (!S.items.length) { $("empty").innerHTML = T("没搜到「{0}」。<br>按 ← 打开来源栏，再选「搜索」换个词。", esc(src.query)); }
     }
@@ -461,6 +469,68 @@
     /* ---------- 账号（accounts.js）：切换、添加、退出 ---------- */
 
     S.acct = { focus: 0, rows: [], outAt: 0 };
+    /* ---------- 设置：诊断日志（diag.js）、自动更新（update.js）。属于这台电视，不跟账号走。按下去的回答是下面那两行字变了 ---------- */
+
+    S.opts = { rows: [], focus: 0, note: "" };
+    function hhmm(t) { var d = new Date(t), h = d.getHours(), m = d.getMinutes(); return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m; }
+    function diagLine() {
+        if (S.opts.note) { return S.opts.note; }
+        var st = Diag.status();
+        if (!st.enabled) { return T("诊断日志关着：什么都不记录，也不上传"); }
+        var parts = [T("这台电视的编号 {0}", st.device)];
+        if (!st.configured) { parts.push(T("这个版本没有接收地址，不会上传")); }
+        if (st.sending) { parts.push(T("正在上传…")); }
+        else if (st.last) { parts.push(st.last.ok ? T("{0} 已上传（编号 {1}）", hhmm(st.last.at), st.last.id) : T("{0} 没传上：{1}", hhmm(st.last.at), T(st.last.why))); }
+        return parts.join(" · ");
+    }
+    function updateLine() {
+        var u = Update.status();
+        var parts = [u.running === u.packaged ? T("正在运行 {0}", u.running) : T("正在运行 {0}（装的是 {1}）", u.running, u.packaged)];
+        if (!u.supported) { parts.push(T("这台电视验不了签名，不能自动更新")); }
+        else if (u.checking) { parts.push(T("正在检查…")); }
+        else if (u.downloaded) { parts.push(T("{0} 已下载，下次打开生效", u.downloaded)); }
+        else if (u.lastCheck) { parts.push(u.lastError ? T("{0} 查过，没查成", hhmm(u.lastCheck)) : T("{0} 查过，没有新版本", hhmm(u.lastCheck))); }
+        return parts.join(" · ");
+    }
+    function optsRows() {
+        function redraw() { if (S.screen === "opts") { drawOpts(); } }
+        return [
+            { label: Diag.enabled() ? T("诊断日志：开") : T("诊断日志：关"), act: function () {
+                Diag.setEnabled(!Diag.enabled());
+                R("诊断日志=" + (Diag.enabled() ? "开" : "关"));
+            } },
+            { label: T("上传诊断日志"), act: function () {
+                if (!Diag.enabled()) { S.opts.note = T("诊断日志关着，先把它打开"); return; }
+                Diag.upload(redraw);
+            } },
+            { label: T("检查更新"), sep: true, act: function () { Update.check(redraw); } }
+        ];
+    }
+    function drawOpts() {
+        S.opts.rows = optsRows();
+        $("opts-list").innerHTML = S.opts.rows.map(function (r, i) {
+            return "<div class='ai" + (r.sep ? " sep" : "") + (i === S.opts.focus ? " focus" : "") + "'>" + esc(r.label) + "</div>";
+        }).join("");
+        $("opts-diag").textContent = diagLine();
+        $("opts-update").textContent = updateLine();
+    }
+    function openOpts() {
+        S.screen = "opts";
+        S.opts.focus = 0;
+        S.opts.note = "";
+        drawOpts();
+        $("opts").classList.add("on");
+    }
+    function closeOpts() { $("opts").classList.remove("on"); S.screen = "home"; }
+    function optsKey(k) {
+        if (k === 10009) { closeOpts(); return; }
+        if (k === 38) { S.opts.focus = Math.max(0, S.opts.focus - 1); }
+        else if (k === 40) { S.opts.focus = Math.min(S.opts.rows.length - 1, S.opts.focus + 1); }
+        else if (k === 13) { S.opts.note = ""; S.opts.rows[S.opts.focus].act(); }
+        else { return; }
+        drawOpts();
+    }
+
     function acctName(a, i) { return a.name || T("账号 {0}", i + 1); }
     function openAcct() {
         S.screen = "acct";
@@ -493,7 +563,7 @@
     /* 切换 / 添加都是记下新的当前账号、重新加载页面（用它的库起后台线程） */
     function switchAcct(a) {
         if (a.id === Accounts.active().id) { closeAcct(); return; }
-        R("切换账号 " + Accounts.active().id + " → " + a.id + "（" + a.name + "）");
+        R("切换账号 " + Accounts.active().id + " → " + a.id + "（" + Diag.priv(a.name) + "）");
         Accounts.switchTo(a.id);
         Store.once(T("已切换到 {0}", a.name));
         location.reload();
@@ -507,7 +577,7 @@
     function signOut() {
         var cur = Accounts.active();
         if (Date.now() - S.acct.outAt > 3000) { S.acct.outAt = Date.now(); toast(T("再按一次确认，退出 {0}", acctName(cur, Accounts.list().indexOf(cur)))); return; }
-        R("退出账号 " + cur.id + "（" + cur.name + "）");
+        R("退出账号 " + cur.id + "（" + Diag.priv(cur.name) + "）");
         TG.logout().then(function () { Accounts.remove(cur.id); location.reload(); });
     }
     /* 扫码登录时按返回：在添加账号就取消（切回原来的），是哪个账号的会话没了就换到别的账号；电视上只有这一个账号才退出应用 */
@@ -515,7 +585,7 @@
         var a = Accounts.active(), others = Accounts.list().filter(function (x) { return x.id !== a.id && x.userId; });
         if (!others.length) { exitApp(); return; }
         if (!a.userId) { R("取消添加账号 " + a.id); Accounts.remove(a.id); }
-        else { R(a.id + "（" + a.name + "）要重新扫码，先换到 " + others[0].id); Accounts.switchTo(others[0].id); }
+        else { R(a.id + "（" + Diag.priv(a.name) + "）要重新扫码，先换到 " + others[0].id); Accounts.switchTo(others[0].id); }
         location.reload();
     }
 
@@ -531,7 +601,7 @@
         S.sources = Store.webSources().concat(S.sources.filter(function (s) { return s.kind !== "web"; }));
         renderRail();
         if (added.length) {
-            R("群「" + group.title + "」里的列表链接 → 来源：" + added.map(function (s) { return s.title + " " + s.url; }).join("，"));
+            R("群「" + Diag.priv(group.title) + "」里的列表链接 → 来源：" + added.map(function (s) { return Diag.priv(s.title) + " " + Diag.priv(s.url); }).join("，"));
             toast(added.length > 1 ? T("左边多了 {0} 个来源，按 ← 打开", added.length) : T("左边多了一个来源「{0}」，按 ← 打开", added[0].title), 5000);
         }
     }
@@ -546,7 +616,7 @@
             try {
                 var ls = await TG.links(d.id, 40);
                 syncWebSources(d, ls.filter(function (l) { return l.kind === "weblist"; }));
-            } catch (e) { R("刷新群「" + d.title + "」的列表链接出错 " + errStr(e)); }
+            } catch (e) { R("刷新群「" + Diag.priv(d.title) + "」的列表链接出错 " + errStr(e)); }
         }
     }
 
@@ -567,17 +637,19 @@
             S.loading = false;
             $("src-sub").textContent = "";
             if (e.needLogin) {
-                R("列表「" + src.title + "」要登录：" + errStr(e) + (S.loggedIn[src.id] ? "（刚登录成功过 —— 登录状态没带上）" : ""));
+                R("列表「" + Diag.priv(src.title) + "」要登录：" + errStr(e) + (S.loggedIn[src.id] ? "（刚登录成功过 —— 登录状态没带上）" : ""));
                 if (S.loggedIn[src.id]) {
                     $("empty").innerHTML = T("登录成功了，但还是看不到这个列表。<br>电视可能带不上这个网站的登录状态（日志里有详情）。");
+                    Diag.incident("网页列表登录成功了还是看不到：" + errStr(e));
                 } else {
                     $("empty").innerHTML = T("这个列表要登录一次才能看（查账号编号）。<br>按确认登录");
                     if (!opts.quiet) { webLogin(src); }
                 }
                 return;
             }
-            R("列表「" + src.title + "」出错 " + errStr(e));
+            R("列表「" + Diag.priv(src.title) + "」出错 " + errStr(e));
             $("empty").innerHTML = T("读不到这个列表：{0}<br>按确认重试", esc(errStr(e)));
+            Diag.incident("读不到网页列表：" + errStr(e));
             return;
         }
         if (g !== S.gen) { return; }
@@ -591,7 +663,7 @@
             if (p && p.at > at) { at = p.at; best = i; }
         });
         S.focus = best >= 0 ? best : 0;
-        R("列表「" + src.title + "」" + Math.round(performance.now() - t0) + "ms（" + page.how + "），" + S.items.length + "/" + (page.total || "?") + " 个" + (page.next ? "，有下一页" : ""));
+        R("列表「" + Diag.priv(src.title) + "」" + Math.round(performance.now() - t0) + "ms（" + page.how + "），" + S.items.length + "/" + (page.total || "?") + " 个" + (page.next ? "，有下一页" : ""));
         renderGrid();
     }
 
@@ -622,7 +694,7 @@
         try { document.activeElement.blur(); } catch (e) {}
         var t0 = performance.now();
         Web.login(src.url, user, pass).then(function (r) {
-            R("登录 " + new URL(src.url).hostname + "：" + (r.ok ? "成功，账号编号 " + r.userId + (r.favs != null ? "，收藏 " + r.favs + " 个" : "") : "失败 " + r.msg) + "，" + Math.round(performance.now() - t0) + "ms");
+            R("登录 " + Diag.priv(new URL(src.url).hostname) + "：" + (r.ok ? "成功，账号编号 " + Diag.priv(r.userId) + (r.favs != null ? "，收藏 " + r.favs + " 个" : "") : "失败 " + Diag.priv(r.msg)) + "，" + Math.round(performance.now() - t0) + "ms");
             if (!r.ok) { $("wl-msg").textContent = T("登录失败：{0}", r.msg); $("wl-pass").value = ""; $("wl-pass").focus(); return; }
             S.loggedIn[src.id] = true;
             closeWebLogin();
@@ -782,24 +854,24 @@
         /* 当文件发的没有时长：1GB 以上的当电影 */
         if ((it.duration || (it.asFile && it.size > 1073741824 ? 3600 : 0)) < 2400 || Store.noPoster(it.fileKey)) { Cover.keepNone(it); return; }
         Cover.poster(it).then(function (ps) {
-            if (ps) { R("海报「" + it.title + "」← " + ps.info); setThumb(it, ps); }
-            else { Store.markNoPoster(it.fileKey); Cover.keepNone(it); R("海报：维基百科没找到对得上的「" + it.title + "」"); }
-        }).catch(function (e) { R("海报出错「" + it.title + "」" + errStr(e)); });
+            if (ps) { R("海报「" + Diag.priv(it.title) + "」← " + Diag.priv(ps.info)); setThumb(it, ps); }
+            else { Store.markNoPoster(it.fileKey); Cover.keepNone(it); R("海报：维基百科没找到对得上的「" + Diag.priv(it.title) + "」"); }
+        }).catch(function (e) { R("海报出错「" + Diag.priv(it.title) + "」" + errStr(e)); });
     }
     function pumpCover() {
         if (S.coverBusy || !S.coverQ.length || S.screen !== "home") { return; }
         var job = S.coverQ.shift(), it = job.it;
         S.coverBusy = true;
-        if (S.coverLogs < 4) { R("封面帧开始「" + it.title + "」" + job.why); }
+        if (S.coverLogs < 4) { R("封面帧开始「" + Diag.priv(it.title) + "」" + job.why); }
         Cover.grab(it).then(function (r) {
             S.coverDone[it.fileKey] = true;
             setThumb(it, { url: r.url, kind: "frame" });
-            R("封面帧「" + it.title + "」" + job.why + " → " + r.info);
+            R("封面帧「" + Diag.priv(it.title) + "」" + job.why + " → " + r.info);
         }).catch(function (e) {
             if (e && e.cancelled) { S.coverQ.unshift(job); return; }
             S.coverDone[it.fileKey] = true;
             Store.markNoFrame(it.fileKey);
-            if (S.coverLogs++ < 4) { R("封面帧失败「" + it.title + "」" + job.why + "：" + errStr(e)); }
+            if (S.coverLogs++ < 4) { R("封面帧失败「" + Diag.priv(it.title) + "」" + job.why + "：" + errStr(e)); }
             fallbackPoster(it);
         }).then(function () { S.coverBusy = false; pumpCover(); });
     }
@@ -873,12 +945,12 @@
                  * 定下来的结果（包括「没有」）都存在电视上，下次直接用。缓存里存的不是频道封面、而这条有频道封面的（以前没读这个字段），重新取。 */
                 (it.kind === "web" ? webThumb(it) : Cover.cached(it).then(function (c) {
                     if (c && (c.kind === "cover" || !it.hasCover)) { if (c.kind !== "none") { setThumb(it, c); } return; }
-                    var first = it.hasCover ? TG.cover(it, CARD_W).catch(function (e) { R("频道封面出错「" + it.title + "」" + errStr(e)); return null; }) : Promise.resolve(null);
+                    var first = it.hasCover ? TG.cover(it, CARD_W).catch(function (e) { R("频道封面出错「" + Diag.priv(it.title) + "」" + errStr(e)); return null; }) : Promise.resolve(null);
                     return first.then(function (cv) {
                         if (cv) {
                             setThumb(it, { url: cv.url, kind: "cover" });
                             Cover.keepThumb(it, cv.bytes, "cover");
-                            if ((S.coverLogged = (S.coverLogged || 0) + 1) <= 3) { R("频道封面「" + it.title + "」" + cv.w + "x" + cv.h + (c ? "（替掉缓存里的 " + c.kind + "）" : "")); }
+                            if ((S.coverLogged = (S.coverLogged || 0) + 1) <= 3) { R("频道封面「" + Diag.priv(it.title) + "」" + cv.w + "x" + cv.h + (c ? "（替掉缓存里的 " + c.kind + "）" : "")); }
                             return;
                         }
                         if (c) { if (c.kind !== "none") { setThumb(it, c); } return; }
@@ -897,7 +969,7 @@
                             else { fallbackPoster(it); }
                         });
                     });
-                })).catch(function (e) { R("封面出错「" + it.title + "」" + errStr(e)); }).then(function () { S.thumbBusy--; pumpThumbs(); });
+                })).catch(function (e) { R("封面出错「" + Diag.priv(it.title) + "」" + errStr(e)); }).then(function () { S.thumbBusy--; pumpThumbs(); });
             })(it);
         }
     }
@@ -947,7 +1019,7 @@
         var moov = await Store.getMoov(it.fileKey);
         if (S.playing !== it) { return; }
         var pref = Store.getPrefs(it.fileKey);
-        R((again ? "换音轨重开「" : "播放「") + it.title + "」" + fmtSize(it.size) + " " + fmtTime(it.duration) + (it.asFile ? "（文件 " + (it.fileName || it.mime) + "）" : "") +
+        R((again ? "换音轨重开「" : "播放「") + Diag.priv(it.title) + "」" + fmtSize(it.size) + " " + fmtTime(it.duration) + (it.asFile ? "（文件 " + Diag.priv(it.fileName || it.mime) + "）" : "") +
           (startAt ? "，从 " + fmtTime(startAt) + (again ? "" : " 接着放") : "") + (moov ? "，" + (moov.mkv ? "MKV 头" : "moov") + "有缓存" : "") + (opts.audio || pref.audio ? "，音轨 " + (opts.audio || pref.audio) : ""));
         if (startAt && !again) { toast(T("从 {0} 接着放", fmtTime(startAt))); }
         var t0 = performance.now();
@@ -985,7 +1057,7 @@
     function playWeb(it, startAt) {
         if (S.playing !== it) { return; }
         player = webPlayer;
-        R("播放网页「" + it.title + "」" + it.url + (startAt ? "，从 " + fmtTime(startAt) + " 接着放" : ""));
+        R("播放网页「" + Diag.priv(it.title) + "」" + Diag.priv(it.url) + (startAt ? "，从 " + fmtTime(startAt) + " 接着放" : ""));
         if (startAt) { toast(T("从 {0} 接着放", fmtTime(startAt))); }
         var t0 = performance.now(), opening = player.open(it, { startAt: startAt });
         spin(true, T("正在解析网页…"));      // open 里报的 loading 会写成「正在打开…」，这里盖掉
@@ -1051,6 +1123,7 @@
         $("perr").innerHTML = T("放不了：{0}", esc(msg || T("未知错误"))) + "<br><span style='color:#8b939b;font-size:28px'>" + T("按返回键回到列表") + "</span>";
         $("perr").style.display = "block";
         R("放不了：" + msg);
+        Diag.incident("放不了：" + msg);
     }
 
     /* 浮层出来时字幕抬到它上面（#player.ovon） */
@@ -1140,7 +1213,7 @@
             if (!S.subs || S.subs.it !== it) { return; }
             S.subs.files = list;
             S.subs.gotFiles = true;
-            if (list.length) { R("群里的字幕文件：" + list.map(function (f) { return f.name + "（" + f.score.toFixed(1) + "）"; }).join("，")); }
+            if (list.length) { R("群里的字幕文件：" + list.map(function (f) { return Diag.priv(f.name) + "（" + f.score.toFixed(1) + "）"; }).join("，")); }
             decideSubs();
         }).catch(function (e) { R("找字幕文件出错 " + errStr(e)); S.subs.gotFiles = true; decideSubs(); });
     }
@@ -1191,14 +1264,23 @@
             var tr = Subs.track("file", null);
             tr.addEvents(ev);
             ss.fileTracks[name] = tr;
-            R("字幕文件「" + name + "」" + Math.round(bytes.length / 1024) + "KB " + ev.length + " 条，" + Math.round(performance.now() - t0) + "ms" + (why ? "（" + why + "）" : ""));
+            R("字幕文件「" + Diag.priv(name) + "」" + Math.round(bytes.length / 1024) + "KB " + ev.length + " 条，" + Math.round(performance.now() - t0) + "ms" + (why ? "（" + why + "）" : ""));
             if (S.subs !== ss || ss.on !== key) { return; }
-            if (!ev.length) { toast(T("字幕文件「{0}」里读不出字幕", name)); ss.on = ""; return; }
+            if (!ev.length) {
+                toast(T("字幕文件「{0}」里读不出字幕", name));
+                Diag.incident("字幕文件里读不出字幕");
+                ss.on = "";
+                return;
+            }
             S.subR.set(tr);
             toast(T("字幕：{0}", (f.lang ? T(f.lang) + " · " : "") + name));
         }).catch(function (e) {
-            R("字幕文件「" + name + "」下载出错 " + errStr(e));
-            if (S.subs === ss && ss.on === key) { ss.on = ""; toast(T("字幕文件下不下来：{0}", errStr(e))); }
+            R("字幕文件「" + Diag.priv(name) + "」下载出错 " + errStr(e));
+            if (S.subs === ss && ss.on === key) {
+                ss.on = "";
+                toast(T("字幕文件下不下来：{0}", errStr(e)));
+                Diag.incident("字幕文件下不下来：" + errStr(e));
+            }
         });
     }
     function setSubOffset(d) {
@@ -1357,7 +1439,7 @@
         findNext(it).then(function (nx) {
             if (S.playing !== it) { return; }
             if (!nx) { finishPlayback(true); return; }
-            R("放完了，下一集「" + nx.title + "」");
+            R("放完了，下一集「" + Diag.priv(nx.title) + "」");
             showUpnext(nx);
         });
     }
@@ -1463,6 +1545,7 @@
                     return;
                 }
                 if (s.id === "__acct") { S.zone = "grid"; renderRail(); updateFocus(); openAcct(); return; }
+                if (s.id === "__opts") { S.zone = "grid"; renderRail(); updateFocus(); openOpts(); return; }
                 S.zone = "grid";
                 openSource(s);
             }
@@ -1560,6 +1643,7 @@
         if (S.screen === "bootfail") { if (k === 13) { location.reload(); } else if (k === 10009) { exitApp(); } return; }
         if (S.screen === "login") { if (k === 10009) { leaveLogin(); } return; }
         if (S.screen === "acct") { acctKey(k); e.preventDefault(); return; }
+        if (S.screen === "opts") { optsKey(k); e.preventDefault(); return; }
         if (S.screen === "home") { homeKey(k); e.preventDefault(); }
         else if (S.screen === "player") { playerKey(k); e.preventDefault(); }
     });
@@ -1577,5 +1661,29 @@
         }
     });
 
-    boot().catch(function (e) { R("启动出错 " + errStr(e) + " | " + String(e && e.stack || "").split("\n").slice(0, 3).join(" ")); });
+    /* 给自测（js/selftest.js）读的 */
+    window.__app = { screen: function () { return S.screen; }, openOpts: openOpts };
+
+    boot().catch(function (e) {
+        R("启动出错 " + errStr(e) + " | " + String(e && e.stack || "").split("\n").slice(0, 3).join(" "));
+        Diag.incident("启动出错：" + errStr(e));
+    });
+
+    /* 自动更新（update.js）：先报这次跑的是哪份代码、为什么，一分钟后查，之后最多每六小时；第一次跑一个新下载的版本时提示一次 */
+    try { Update.init({ report: Log.report, notice: function () { toast(T("已更新到 {0}", Boot.info().running), 4000); } }); }
+    catch (e) { R("Update.init 抛异常：" + errStr(e)); }
+    /* 这次启动 boot.js 扔掉了一个走不到首页的更新包。观众什么都看不到（照常跑安装包），开发者只能从这里知道 */
+    try {
+        var bootNote = Boot.info().note || "";
+        if (/标坏|选代码时出错/.test(bootNote)) { Diag.incident("更新包启动失败：" + bootNote); }
+    } catch (e) {}
+    /* 这次启动的代码是好的：脚本都跑完、之后两秒没有一个 js 错误。boot.js 见到 Boot.ok() 才清掉 booting；没说这句的启动，下次打开
+     * 把它跑的那个更新标坏、改跑安装包。不等连上 Telegram —— 断网时连不上，那不是代码坏了 */
+    setTimeout(function () {
+        if (Log.errors()) {
+            R("启动后两秒内出过 " + Log.errors() + " 次 js 错误，这次启动不算成功（跑的是更新的话，下次打开退回安装包）");
+            return;
+        }
+        try { Boot.ok(); } catch (e) {}
+    }, 2000);
 })();

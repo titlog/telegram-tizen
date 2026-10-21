@@ -90,6 +90,9 @@ const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
 page.on('pageerror', e => console.log('  pageerror ' + e.message));
 await page.route('**/app/js/tg.js', r => r.fulfill({ contentType: 'text/javascript', body: stub }));
 await page.route('**/app/js/sites.local.js', r => r.fulfill({ contentType: 'text/javascript', body: '' }));
+/* 应用自己会往外连的两处：诊断日志的接收端（地址从 diag.js 读）、自动更新查的 GitHub / jsDelivr —— 测试里一律拦掉，不往线上传东西 */
+const OUTSIDE = [new URL(/var ENDPOINT = "([^"]+)"/.exec(fs.readFileSync(ROOT + 'app/js/diag.js', 'utf8'))[1]).host, 'raw.githubusercontent.com', 'cdn.jsdelivr.net'];
+await page.route((u) => OUTSIDE.includes(u.host), (r) => r.abort());
 await page.route('**/app/js/config.js', r => r.fulfill({ contentType: 'text/javascript', body: 'var REPORT_TO=""; var TG_API_ID=1; var TG_API_HASH="x";' }));
 const sleep = (t) => new Promise(r => setTimeout(r, t));
 const key = async (code, n = 1) => { for (let i = 0; i < n; i++) { await page.evaluate(c => document.dispatchEvent(new KeyboardEvent('keydown', { keyCode: c, bubbles: true })), code); await sleep(150); } };

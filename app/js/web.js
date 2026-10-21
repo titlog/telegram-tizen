@@ -432,7 +432,7 @@ var Web = (function () {
                 sess.timer = setTimeout(function () { fail(sess, tx("40 秒没出画面")); }, 40000);
                 resolve(item.url).then(function (r) {
                     if (S !== sess) { return; }
-                    R("解析 " + Math.round(r.ms) + "ms（" + r.how + "）→ " + r.type + " " + host(r.url));
+                    R("解析 " + Math.round(r.ms) + "ms（" + r.how + "）→ " + r.type + " " + Diag.priv(host(r.url)));
                     start(sess, r.url, r.type, sess.startAt);
                 }).catch(function (e) { if (S === sess) { fail(sess, errStr(e)); } });
             });

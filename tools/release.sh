@@ -60,13 +60,21 @@ git show HEAD:app/js/config.js | grep -q '^var TG_API_HASH = "";' \
   || { echo "  HEAD 的 config.js 里 TG_API_HASH 不是空的 —— 拒绝发布"; exit 1; }
 git show HEAD:app/js/config.js | grep -q '^var TG_API_PACKED = "";' \
   || { echo "  HEAD 的 config.js 里 TG_API_PACKED 不是空的 —— 拒绝发布"; exit 1; }
+for v in UPDATE_MANIFEST DIAG_TO SELFTEST; do
+  git show HEAD:app/js/config.js | grep -q "^var $v = \"\";" || { echo "  HEAD 的 config.js 里 $v 不是空的 —— 拒绝发布"; exit 1; }
+done
+# 没有接收地址，这一版要带回来的诊断日志就无处可去。
+git show HEAD:app/js/diag.js | grep -q '^    var ENDPOINT = "https://[^"]*";' \
+  || { echo "  HEAD 的 diag.js 里 ENDPOINT 不是 https 地址 —— 拒绝发布"; exit 1; }
 
 echo "== checking =="
 for f in app/js/*.js; do
   [ "${f:t}" = "tg.bundle.js" ] && continue
   node --check "$f" >/dev/null || { echo "  syntax error in $f"; exit 1; }
 done
-node test/i18n.mjs >/dev/null || { node test/i18n.mjs | grep '✗'; echo "  refuse to release"; exit 1; }
+for t in test/i18n.mjs tools/update-verify.mjs tools/diag-verify.mjs; do
+  node "$t" >/dev/null || { node "$t" | grep '✗'; echo "  refuse to release"; exit 1; }
+done
 
 echo "== signing profile =="
 if [ ! -f "$PW_FILE" ]; then
@@ -158,6 +166,9 @@ if not re.search(r'^var TG_API_HASH = "";$', cfg, re.M):
     problems.append("config.js: TG_API_HASH is not empty (plaintext hash)")
 if not re.search(r'^var TG_API_PACKED = "[A-Za-z0-9+/=]{40,}";$', cfg, re.M):
     problems.append("config.js: TG_API_PACKED is missing")
+for v in ("UPDATE_MANIFEST", "DIAG_TO", "SELFTEST"):
+    if not re.search(r'^var %s = "";$' % v, cfg, re.M):
+        problems.append("config.js: %s is not empty" % v)
 if re.search(r'(?<!\d)%s(?!\d)' % re.escape(os.environ["TG_ID"]), cfg):
     problems.append("config.js: the API ID appears in plaintext")
 # 明文的 hash 不许出现在任何一个文件里（不止 config.js：打包、改写出错时它可能落在别处）。
@@ -191,7 +202,7 @@ if problems:
     for p in problems:
         print("  !! " + p)
     sys.exit(1)
-print("  %d files, REPORT_TO empty, the project's API ID / Hash packed (no plaintext in any file), no personal certificate" % len(names - signatures))
+print("  %d files, REPORT_TO / UPDATE_MANIFEST / DIAG_TO / SELFTEST empty, the project's API ID / Hash packed (no plaintext in any file), no personal certificate" % len(names - signatures))
 PY
 
 echo "== done =="

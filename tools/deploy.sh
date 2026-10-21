@@ -3,12 +3,17 @@
 # 电视、证书、签名档沿用 bilibili-tizen 的（~/.bilibili-tizen.conf、签名档 SamsungBili）——同一台电视、
 # 同一张分发证书，证书按设备签，不按应用签。Telegram 凭证在 ~/.telegram-tizen.conf（不进仓库）。
 #   zsh tools/deploy.sh
-#   zsh tools/deploy.sh --noapi    不写凭证：和发布包一样，第一次打开要在电视上填 API ID / Hash（apikey.js）；测完装回正常构建
+#   zsh tools/deploy.sh --noapi    不写凭证：第一次打开要在电视上填 API ID / Hash（apikey.js）；测完装回正常构建
+#   zsh tools/deploy.sh --diag     诊断日志：设置页里手动传、关掉再开、造一次出事自动传（js/selftest.js，1 分钟）；
+#                                  传到 TG_DIAG_TO，默认这台电脑上的 PORT=8096 node ../bilibili-tizen/tools/diag-local.mjs（先开着）
+#   TG_UPDATE_MANIFEST=http://<这台电脑>:<端口>/manifest.json zsh tools/deploy.sh   在电视上测自动更新（只有开发构建认它）
 set -e
 NOAPI=""
+SELFTEST=""
 for a in "$@"; do
   case "$a" in
     --noapi) NOAPI=1 ;;
+    --diag) SELFTEST="diag" ;;
   esac
 done
 
@@ -45,16 +50,27 @@ echo "== bundling =="
   npx esbuild src/entry.js --bundle --format=iife --target=chrome120 --loader:.wasm=binary --loader:.txt=text \
     --minify --legal-comments=none --log-level=warning --outfile="$APP/js/tg.bundle.js")
 for f in "$APP"/js/*.js; do node --check "$f" >/dev/null || { echo "  syntax error in $f"; exit 1; }; done
+# 自动更新（钥匙、版本号、boot.js 每种本地状态下选对代码、mtcute / hls.js 换了 SHELL 有没有加一）、诊断日志（去隐私、什么时候传）
+for t in tools/update-verify.mjs tools/diag-verify.mjs; do
+  node "$ROOT/$t" >/dev/null || { node "$ROOT/$t" | grep '✗'; echo "  refuse to deploy"; exit 1; }
+done
 
 echo "== report -> http://$HOST_IP:$PORT =="
 CFG="$APP/js/config.js"
 restore() {
   sed -i '' -E -e 's#^var REPORT_TO = "[^"]*";#var REPORT_TO = "";#' \
     -e 's#^var TG_API_ID = [0-9]+;#var TG_API_ID = 0;#' \
-    -e 's#^var TG_API_HASH = "[^"]*";#var TG_API_HASH = "";#' "$CFG"
+    -e 's#^var TG_API_HASH = "[^"]*";#var TG_API_HASH = "";#' \
+    -e 's#^var UPDATE_MANIFEST = "[^"]*";#var UPDATE_MANIFEST = "";#' \
+    -e 's#^var DIAG_TO = "[^"]*";#var DIAG_TO = "";#' \
+    -e 's#^var SELFTEST = "[^"]*";#var SELFTEST = "";#' "$CFG"
 }
 trap restore EXIT
 sed -i '' -E -e "s#^var REPORT_TO = \"[^\"]*\";#var REPORT_TO = \"http://$HOST_IP:$PORT\";#" "$CFG"
+[ -n "$TG_UPDATE_MANIFEST" ] && { sed -i '' -E "s#^var UPDATE_MANIFEST = \"[^\"]*\";#var UPDATE_MANIFEST = \"$TG_UPDATE_MANIFEST\";#" "$CFG"; echo "  update manifest=$TG_UPDATE_MANIFEST"; }
+[ "$SELFTEST" = "diag" ] && TG_DIAG_TO="${TG_DIAG_TO:-http://$HOST_IP:8096/v1/upload}"
+[ -n "$TG_DIAG_TO" ] && { sed -i '' -E "s#^var DIAG_TO = \"[^\"]*\";#var DIAG_TO = \"$TG_DIAG_TO\";#" "$CFG"; echo "  diag -> $TG_DIAG_TO"; }
+[ -n "$SELFTEST" ] && { sed -i '' -E "s#^var SELFTEST = \"[^\"]*\";#var SELFTEST = \"$SELFTEST\";#" "$CFG"; echo "  selftest=$SELFTEST"; }
 if [ -n "$NOAPI" ]; then
   echo "  --noapi：包里不带 API ID / Hash，电视上第一次打开要填（已经填过的话用填过的）"
 else
@@ -98,3 +114,7 @@ perl -e 'alarm 240; exec @ARGV' tizen install -n "$(basename "$WGT")" -t "$TARGE
 echo "== launching =="
 tizen run -p "$APP_ID" -t "$TARGET" 2>&1 | grep -E "successfully|failed" || true
 echo "== done =="
+if [ -n "$SELFTEST" ]; then
+  echo
+  echo "!! 电视上现在是自测构建。看完结果装回正常构建： zsh tools/deploy.sh"
+fi

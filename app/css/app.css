@@ -160,6 +160,17 @@ video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; back
 #acct .ai.focus .ck { color: #fff; }
 #qrnote { color: #f0b429; font-size: 30px; margin-top: 20px; }
 
+/* 设置：和账号页一个样子，下面两行状态 */
+#opts { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: rgba(10, 13, 16, 0.96); display: none; }
+#opts.on { display: block; }
+#opts .box { position: absolute; left: 460px; top: 150px; width: 1000px; }
+#opts .h { font-size: 56px; margin-bottom: 36px; }
+#opts .ai { font-size: 36px; height: 84px; line-height: 84px; padding: 0 30px; border-radius: 10px; color: #d0d4d8; }
+#opts .ai.sep { margin-top: 24px; }
+#opts .ai.focus { background: #2aabee; color: #fff; }
+#opts .st { font-size: 28px; line-height: 1.5; color: #c5cad0; margin-top: 24px; min-height: 42px; }
+#opts .sub { font-size: 26px; line-height: 1.6; color: #8b939b; margin-top: 40px; }
+
 /* 第一次打开：填 API ID / Hash（apikey.js）。和网页登录一个样子，右边多一个去 my.telegram.org 的码 */
 #api { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: #101418; display: none; }
 #api.on { display: block; }

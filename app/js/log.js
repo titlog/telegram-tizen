@@ -7,6 +7,9 @@ var Log = (function () {
     var tokens = 20, refillAt = 0, dropped = 0, misses = 0, sleepUntil = 0;
 
     function report(kind, msg) {
+        /* 每一行也记进诊断日志那一圈（diag.js，在那里去掉身份）；Diag.priv() 包起来的部分到收集器这边是原样。 */
+        Diag.record(kind, msg);
+        msg = Diag.plain(msg);
         var line = kind + ": " + msg;
         if (typeof console !== "undefined") { try { console.log(line); } catch (e) {} }
         if (!REPORT_TO) { return; }
@@ -46,11 +49,18 @@ var Log = (function () {
     window.addEventListener("unhandledrejection", function (e) {
         var r = e.reason;
         report("onerror", "未处理的 Promise 异常：" + (r && r.message ? r.message : String(r)) + (r && r.stack ? " | " + String(r.stack).split("\n").slice(1, 3).join(" ").replace(/\s+/g, " ").slice(0, 160) : ""));
+        Diag.incident("未处理的 Promise 异常：" + (r && r.message ? r.message : String(r)));
     });
 
+    /* 数着给自动更新的启动检查用（app.js）：起来的路上抛过错的启动，不算代码是好的。
+     * Boot.scriptName：更新包的脚本跑在 blob: 地址上，一串 uuid 说不出是哪个文件。 */
+    var errors = 0;
     window.onerror = function (m, src, line) {
-        report("onerror", m + " @" + String(src || "").split("/").pop() + ":" + line);
+        errors++;
+        var file = typeof Boot !== "undefined" ? Boot.scriptName(src) : String(src || "").split("/").pop();
+        report("onerror", m + " @" + file + ":" + line);
+        Diag.incident("js 错误：" + m + " @" + file + ":" + line);
     };
 
-    return { report: report };
+    return { report: report, errors: function () { return errors; } };
 })();

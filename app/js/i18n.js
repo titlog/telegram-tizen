@@ -65,6 +65,38 @@ var I18n = (function () {
         "App api_hash 是 32 位，现在是 {0} 位": "App api_hash is 32 characters long; this is {0}",
         "存不下来（电视的存储出错了）": "Could not save it (the TV's storage failed)",
         "没有 API ID / Hash": "No API ID / Hash",
+        "已更新到 {0}": "Updated to {0}",
+
+        /* ---------- 设置：诊断日志、自动更新 ---------- */
+        "设置": "Settings",
+        "诊断日志：出问题时（连不上、读不到、放不了），应用会把排查需要的运行信息传给开发者，不会泄露个人隐私。到 GitHub 报问题时附上这台电视的编号。<br>自动更新：新版本从这个项目的 GitHub 仓库下载，带签名，验过才用，下次打开生效；新版本启动不起来会自动退回装的这一版。":
+            "Diagnostic logs: when something goes wrong (can't connect, can't load, won't play), the app sends the developer the information needed to find out why, and nothing that identifies you. " +
+            "When reporting a problem on GitHub, quote this TV's code.<br>Self-update: new versions come from this project's GitHub repository, signed, and are used only once verified, from the next launch; " +
+            "a new version that cannot start falls back to the installed one.",
+        "诊断日志：开": "Diagnostic logs: on",
+        "诊断日志：关": "Diagnostic logs: off",
+        "上传诊断日志": "Send diagnostic logs",
+        "检查更新": "Check for updates",
+        "诊断日志关着：什么都不记录，也不上传": "Diagnostic logs are off: nothing is recorded or sent",
+        "这台电视的编号 {0}": "This TV's code: {0}",
+        "这个版本没有接收地址，不会上传": "this build has no address to send to",
+        "正在上传…": "sending…",
+        "{0} 已上传（编号 {1}）": "sent at {0} (code {1})",
+        "{0} 没传上：{1}": "not sent at {0}: {1}",
+        "诊断日志关着，先把它打开": "Diagnostic logs are off — switch them on first",
+        "诊断日志关着": "diagnostic logs are off",
+        "这个版本没有接收地址": "this build has no address to send to",
+        "正在上传上一份": "still sending the previous one",
+        "刚传过，过几秒再按": "just sent — wait a few seconds",
+        "连不上": "can't connect",
+        "超时": "timed out",
+        "正在运行 {0}": "Running {0}",
+        "正在运行 {0}（装的是 {1}）": "Running {0} (installed: {1})",
+        "这台电视验不了签名，不能自动更新": "this TV cannot verify signatures, so it cannot update itself",
+        "正在检查…": "checking…",
+        "{0} 已下载，下次打开生效": "{0} downloaded, runs from the next launch",
+        "{0} 查过，没查成": "checked at {0}, the check failed",
+        "{0} 查过，没有新版本": "checked at {0}, no newer version",
 
         /* ---------- 启动、登录、来源 ---------- */
         "连不上 Telegram": "Can't reach Telegram",

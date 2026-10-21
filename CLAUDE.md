@@ -12,6 +12,11 @@ app/js/player.js  播放引擎：MediaSource + 音视频两个 SourceBuffer，�
 app/js/mp4.js     自己写的渐进式 MP4 → fMP4：样本表 TypedArray、二分找关键帧、拼 moof+mdat（替掉了 mp4box）；也认 tx3g 字幕轨
 app/js/mkv.js     自己写的 MKV / WebM：读头和 Cues、按 Cluster 顺序拆块、算解码时间，交给 Mp4.fragmentFrames
 app/js/accounts.js  多账号：每个账号一个会话库（tg-session、tg-session-2…），每人一份的本地记录（scope），切换 = 重新加载
+app/js/boot.js    这次跑哪份代码：安装包的，还是自动更新下载、验过签名的新版本；信任根（公钥），永远不随更新下发。index.html 只剩
+                  config.js、boot.js 两个标签，**新加脚本加进 boot.js 的 SCRIPTS**
+app/js/update.js  查新版本、下载、验签名、存进 localStorage；本身随更新下发。见「自动更新和诊断日志」
+app/js/diag.js    诊断日志：每一行去掉身份记进一圈，出事或手动时传给开发者；接收地址在这里（config.js 不随更新下发）
+app/js/selftest.js  deploy.sh --diag 才跑的那一段（设置页里传一次、开关、造一次出事）
 app/js/apikey.js  用哪组 API ID / Hash：电视上填过的 → 包里明文的（deploy.sh）→ 包里打乱过的（release.sh）；Telegram 拒了就回填写页
 app/js/i18n.js    界面语言：中文原句当键查英文（T("…")），跟系统语言、来源栏最下面切换
 app/js/subs.js    字幕：外挂文件（SRT/ASS/VTT，GBK/Big5 自动认）、tx3g、MKV 的文字和 PGS 图形字幕、画到屏幕上
@@ -20,6 +25,8 @@ app/js/sites.local.js  站点规则（Web.register），本机自己写，不进
 app/js/store.js   本地：看到哪里（localStorage，按账号分开）、上次的来源、moov 缓存（IndexedDB，留 12 个，整台电视共用）
 build/src/        mtcute 打包：worker.js（后台线程里的客户端）先打成文本，嵌进 entry.js（主线程的端口 + 二维码）
 tools/deploy.sh   打包、写入上报地址和凭证、签名、安装、启动；打完包把凭证改回空值（--noapi 不写凭证，测填写页）
+tools/update-*.mjs  自动更新：update-key（钥匙，只跑一次）、update-release（打包签名 → update/）、update-verify（离线验证，deploy / release 卡着）
+tools/diag-verify.mjs  诊断日志离线验证：去隐私、什么时候传、源码里没包起来的名字（deploy / release 卡着）
 tools/release.sh  给陌生人的发布包 → dist/：git archive HEAD + 现打 mtcute，凭证打乱后写进去，一次性作者证书，读回验证
 tools/collect.mjs 日志收集，:8097（抖音 :8098、bilibili :8099）
 test/check.mjs    mp4.js 离线校验（对照 ffprobe，拼出来的 fMP4 交给 ffmpeg 解码）
@@ -45,6 +52,8 @@ node test/check-mkv.mjs test/media/mkv/*.mkv test/media/mkv/*.webm   # 改 mkv.j
 node test/check-subs.mjs                         # 改 subs.js 之后
 node test/i18n.mjs                               # 改了界面上的字之后
 node test/apikey.mjs                             # 改 apikey.js、填写页、登录出错的处理之后（UILANG=en 英文）
+zsh tools/deploy.sh --diag                       # 诊断日志在电视上走一遍（7 步，1 分钟）；先开 PORT=8096 node ../bilibili-tizen/tools/diag-local.mjs
+node ../bilibili-tizen/tools/diag-logs.mjs --app telegram-tizen   # 读别人电视传上来的（--device 编号 / <id>）
 zsh tools/release.sh                             # 发布包 → dist/telegram-tizen-<版本>.wgt
 node test/serve.mjs & node test/run.mjs media/a_h264_fast.mp4 "media/b_h264_moovend.mp4?start=30"   # 改 player.js 之后
 node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv / ONLY=acct 只跑那一段，UILANG=en 英文界面）
@@ -289,4 +298,50 @@ Telegram 官方 Android 客户端的源码里就写着它自己的（`APP_ID = 4
   项目那组、打乱过的那组都出了登录二维码；`ui-emu.mjs` 全过。电视上（10-21）：`--noapi` 装上，日志「包里没带 API ID / Hash，也没填过，
   等用户在电视上填」；装回正常构建，「API ID 是安装包里带的」、账号对上、2.6 秒到主页。**在电视上用遥控器和屏幕键盘真的填一遍还没做过**
   （搜索框、网页登录用的是同一套输入法，都在电视上用过）。
-- 发布包没有自动更新（bilibili / 抖音那套没搬过来），升级要再装一次新的 `.wgt`；同一张三星证书签的包覆盖安装，会话和本地记录都留着。
+- 1.0.0 没有自动更新，1.1.0 起有（见下一节）；从 1.0.0 升上来要再装一次 `.wgt`。同一张三星证书签的包覆盖安装，会话和本地记录都留着。
+
+## 自动更新和诊断日志（2026-10-21，用户要求，照搬 douyin / bilibili）
+
+和那两个应用是同一份代码（来龙去脉在 bilibili 的 `docs/自动更新.md`、`docs/调试与日志.md`）：签名过的 `update/manifest.json` 从 master 取，
+更新包按 tag 取，下载时验 ECDSA 签名和 sha256，存进 localStorage，**下次打开生效**；走不到首页的更新包下次启动标坏、退回安装包。
+诊断日志出事（或手动）时把最近 600 行传到 bilibili 那边的接收端（`server/diag-worker.mjs`，三个应用共用，按 `app` 分开）。
+
+**自动更新这里不一样的地方：**
+- **mtcute（`js/tg.bundle.js`，2.8MB）、hls.js（`js/vendor/hls.min.js`，600KB）不随更新下发**，一直用安装包里的（`tools/update-lib.mjs` 的
+  `PACKAGED`，`sites.local.js` 也是）。整份存进 localStorage 要 7–8MB（UTF-16），电视上的配额没量过；我们自己的代码只有 ~420KB。boot.js 跑
+  更新包时，包里没有的脚本照样写 `js/<名字>` 从安装包读。**所以改了 mtcute（`build/`）或 hls.js，就是换了壳：boot.js 的 `SHELL` 加一**，
+  SHELL 更老的电视跳过那一版、要重装。`update/shell.json` 记着每个 SHELL 发布时这两样的指纹，`update-release` 和 `update-verify` 都卡着。
+- 钥匙是自己的：私钥 `~/.telegram-tizen-update-key.pem`、口令 `~/.telegram-tizen-update-password`（都 600、都在仓库外），公钥指纹
+  `5ee2:90e1:9906:fe44:adf7:60f7:8988:4173`。不和 bilibili、抖音共用。丢了要所有人重装；泄露了谁都能往装着它的电视推代码，而这个应用开着
+  登录好的 Telegram 会话。
+- 不是「CSP 模式」（config.xml 刻意没有 allow-navigation 和 CSP），`blob:` 脚本照常跑；哪天加了 CSP，script-src、style-src 要加 `blob:`
+  （update-verify 卡着）。
+- 启动检查：脚本都跑完、之后两秒没有 `window.onerror` 才 `Boot.ok()`（`Log.errors()` 数着）。不等连上 Telegram：断网不是代码坏了。
+- 第一次跑一个新下载的版本时提示「已更新到 x.y.z」；设置页（来源栏「设置」）写着正在运行哪一版、下载好了没有，能「检查更新」。
+
+**诊断日志这里不一样的地方：**
+- **往日志里放群名、片名、文件名、字幕文件名、搜索词、网页地址和主机名、账号名、Telegram 用户 ID、网站账号编号，一律包 `Diag.priv()`**。
+  `diag-verify` 从源码里查 `R` / `Log.report` / `Diag.incident` 的参数，卡着 `.title`、`.fileName`、`.query`、`.url`、`.hostname`、`.userId`、
+  账号名、`ps.info`、`host(`。`scrub()` 兜底：「」里的一律当名字（这个项目写日志的习惯）、任何 `http(s)://` 和 `tg://`、`id=<数字>`、
+  「账号编号 …」、32 位以上的十六进制（API Hash）。
+- 出事 = `Diag.incident`：连不上 Telegram、读不到来源里的视频 / 网页列表、搜索出错、放不了、字幕文件读不出 / 下不下来、启动出错、js 错误、
+  安装包带的 API ID 被拒、更新包被标坏。电视上填错的 API ID 不算（那是这一台的事）。
+- 开关、手动上传、这台电视的编号在设置页。开发构建（`REPORT_TO` 非空）不传，除非 `TG_DIAG_TO`（`--diag` 默认这台电脑的 :8096 ——
+  :8097 是这里的收集器）。
+- 桌面测试（`ui-emu` / `readme-shots` / `apikey`）里，接收端（地址从 diag.js 读）和 GitHub / jsDelivr 一律拦掉，测试不往线上传东西。
+
+**测过的（同一天）：** `update-verify`、`diag-verify` 全过（diag-verify 故意弄坏 6 处都抓到）；`ui-emu` 全过（加了设置页那一段；来源栏底下多了
+「设置」之后，旧测试按位置去「账号」落到了设置上 —— 改成按文字找）；电视 `--diag` 7 步全过，读回传上去的那份：账号名、用户 ID、群名
+全是「…」。电视上的自动更新（装标成 1.0.0 的开发构建、更新源指到这台电脑上一个标成 1.0.1 的更新包）：上一个构建查 GitHub 404 记了一次
+失败，这一个按退避 15 分钟后才查（这条规则是对的，没为测试改它）→ `已下载 1.0.1，下次打开生效（420KB …，145ms）`；重装即重启 →
+`这次跑的是更新 1.0.1（安装包 1.0.0）`，mtcute 从安装包读、连上 Telegram、账号对上、2.4 秒到主页；再开还是 1.0.1（`Boot.ok()` 清掉了
+booting）；装回 1.1.0 → `下载过的 1.0.1 不比安装包 1.1.0 新，删掉了`。
+
+### 发一版
+
+1. 改 `app/config.xml` 的版本号和 `app/js/boot.js` 的 `PACKAGED_FALLBACK`（要一致，update-verify 卡着），提交。改了 mtcute / hls.js 的话 `SHELL` 加一。
+2. `node tools/update-release.mjs`（取自 `git archive HEAD`，`app/`、`build/` 有未提交改动就拒绝），
+   `git add update && git commit -m "更新包 x.y.z" && git tag vx.y.z && git push origin master vx.y.z`
+   —— tag 要一起推：manifest 从 master 取，bundle 从 tag 取。
+3. `zsh tools/release.sh` 出 wgt，`gh release create`，说明中英双份。
+4. 装着 1.1.0 以后版本的电视会自己更新。
