@@ -160,6 +160,20 @@ video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; back
 #acct .ai.focus .ck { color: #fff; }
 #qrnote { color: #f0b429; font-size: 30px; margin-top: 20px; }
 
+/* 第一次打开：填 API ID / Hash（apikey.js）。和网页登录一个样子，右边多一个去 my.telegram.org 的码 */
+#api { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: #101418; display: none; }
+#api.on { display: block; }
+#api .box { position: absolute; left: 120px; top: 120px; width: 1060px; }
+#api .h { font-size: 56px; margin-bottom: 24px; }
+#api .sub { font-size: 28px; line-height: 1.6; color: #8b939b; margin-bottom: 30px; }
+#api .lab { font-size: 30px; color: #c5cad0; margin: 24px 0 10px; }
+#api input { font-size: 40px; width: 1020px; padding: 14px 18px; border: 3px solid #3a424b; border-radius: 10px; background: #1b2128; color: #fff; outline: none; font-family: monospace; }
+#api input:focus { border-color: #2aabee; }
+#api-msg { font-size: 30px; color: #f0b429; margin-top: 30px; min-height: 40px; line-height: 1.5; }
+#api-qr { position: absolute; left: 1320px; top: 240px; width: 480px; height: 480px; background: #fff; }
+#api-qr svg { width: 100%; height: 100%; display: block; }
+#api-url { position: absolute; left: 1320px; top: 750px; width: 480px; text-align: center; font-size: 32px; color: #2aabee; }
+
 /* 网页登录 */
 #wl { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: rgba(10, 13, 16, 0.94); display: none; }
 #wl.on { display: block; }

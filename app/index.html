@@ -65,6 +65,19 @@
   </div>
 </div>
 
+<!-- 第一次打开（apikey.js）：发布包里不带 API ID / Hash，填用户自己在 my.telegram.org 申请的 -->
+<div id="api">
+  <div class="box">
+    <div class="h" data-i18n>填你自己的 Telegram API ID</div>
+    <div class="sub" data-i18n>这台电视要用一组你自己的 Telegram API ID 才能连上。只要填一次，只存在这台电视上。<br>用手机扫右边的码打开 my.telegram.org，用你的手机号登录，点「API development tools」，随便填个名字建一个应用，把 App api_id 和 App api_hash 填在下面。<br>用遥控器输入，输完按屏幕键盘上的「完成」。</div>
+    <div class="lab">App api_id</div><input id="api-id" type="text" autocomplete="off">
+    <div class="lab">App api_hash</div><input id="api-hash" type="text" autocomplete="off" spellcheck="false">
+    <div id="api-msg"></div>
+  </div>
+  <div id="api-qr"></div>
+  <div id="api-url">my.telegram.org</div>
+</div>
+
 <!-- 账号（accounts.js）：切换、添加、退出 -->
 <div id="acct">
   <div class="box">
@@ -92,6 +105,7 @@
 <script src="js/log.js"></script>
 <script src="js/i18n.js"></script>
 <script src="js/accounts.js"></script>
+<script src="js/apikey.js"></script>
 <script src="js/tg.bundle.js"></script>
 <script src="js/mp4.js"></script>
 <script src="js/mkv.js"></script>

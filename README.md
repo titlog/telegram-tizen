@@ -48,9 +48,31 @@
 | **实测可用** | 三星 2023 年款 65 吋 **CU7090**，固件 Tizen 9.0（Chromium 120） |
 | **其他机型** | 没人试过。装成功或者失败，都欢迎开 issue 说一声机型和固件版本 |
 
-## 安装（从源码）
+## 安装
 
-三星商店不收第三方客户端，只能侧载。
+三星商店不收第三方客户端，只能侧载。**只需要一次**，之后电视上直接开。两条路：
+
+| | 装发布包（推荐） | 从源码装 |
+|---|---|---|
+| 适合 | 只想在电视上看 | 要改代码、要看诊断日志 |
+| 需要 | 电脑（Windows / macOS / Linux）**或安卓手机**，装上 [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung) | macOS、Node、Tizen Studio 命令行工具，以及你自己申请的 Telegram API ID |
+| 升级 | 再装一次新版 `.wgt`，扫码登录和看到哪里都留着 | `git pull`，再跑一次 `deploy.sh` |
+
+**两条路都要先做这一步：** 电视上打开开发者模式——在「应用」页面用遥控器输入 `12345`，打开开关，Host PC IP 填装应用的
+那台电脑或手机的 IP——然后**把电视完整断电重启一次**。2023 年以后的三星电视只认三星签发的证书，两条路都会替你申请。
+
+### 装发布包
+
+1. 到 [Releases](https://github.com/titlog/telegram-tizen/releases/latest) 下载 `telegram-tizen-<版本>.wgt`。
+2. 装 [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung/releases)，电脑版、安卓版都行。
+3. 打开它，选中你的电视（列表里没有就手动输入电视的 IP），应用选自定义 `.wgt`，选第 1 步下载的文件，安装。第一次会让你
+   登录三星账号，替这台电视签证书。
+4. 电视上打开「TG 视频」，手机打开 Telegram → 设置 → 设备 → 关联桌面设备，扫码。
+
+发布包带着这个项目的 Telegram API ID，装上就能扫码。万一哪天 Telegram 不再接受它，应用会请你填一组自己在
+[my.telegram.org](https://my.telegram.org) 申请的（电视上有去那里的二维码），填一次就行。
+
+### 从源码装
 
 1. 电视、开发者模式、三星证书、签名档都沿用 [bilibili-tizen](https://github.com/titlog/bilibili-tizen) 的配置：
    先按它 README 里「从源码装」那一节跑一次 `zsh tools/setup.sh`。
@@ -68,11 +90,14 @@
 
 更新：`git pull` 之后再跑一次 `deploy.sh`。
 
+> **两条路不要来回换。** 两边签名用的证书不同，电视不让一个证书签的包覆盖另一个证书签的同名应用。要换路，先在电视上把
+> 旧的删掉再装——删掉会清空扫码登录和看到哪里，要重新扫一次。
+
 ## 账号与隐私
 
 - 扫码登录，会话存在电视的 IndexedDB 里，不经过任何别的服务器。多个账号各存各的库；切换不要密码，拿着遥控器就能切。
   退出一个账号会让 Telegram 作废这个会话，并删掉电视上这个人的记录。
-- API ID / Hash 是你自己申请的，只打进你自己的安装包。
+- 发布包带着这个项目的 API ID / Hash；从源码装的用你自己申请的，只打进你自己的安装包。在电视上填过的（内置的那组不能用时）只存在电视本机。
 - 部署脚本会把**你这台电脑的局域网地址**写进包里，作为诊断日志的去处；只有你在电脑上开着收集器时才有东西被收到。
 - 网页登录（有的站的列表要登录）：密码不存、不写日志，只记下网站回的账号编号。
 
@@ -84,7 +109,7 @@ zsh tools/deploy.sh          # 终端 2
 ```
 
 桌面上的测试在 `test/`：`check.mjs` 对照 ffprobe 校验 MP4 解析，`check-mkv.mjs` 逐帧校验 MKV 解析，`check-subs.mjs` 校验字幕
-（PGS 和 ffmpeg 的渲染逐像素比），`run.mjs` 测播放引擎，`ui-emu.mjs` 用假数据把界面走一遍并截图，`readme-shots.mjs` 重拍 README 里的截图，`i18n.mjs` 检查界面上每句话都有英文（`ui-emu.mjs`、`readme-shots.mjs` 加 `UILANG=en` 跑英文界面）。
+（PGS 和 ffmpeg 的渲染逐像素比），`run.mjs` 测播放引擎，`ui-emu.mjs` 用假数据把界面走一遍并截图，`readme-shots.mjs` 重拍 README 里的截图，`i18n.mjs` 检查界面上每句话都有英文，`apikey.mjs` 走一遍 API ID 从哪来和填写页（`ui-emu.mjs`、`readme-shots.mjs` 加 `UILANG=en` 跑英文界面）。
 它们要 Playwright 和 ffmpeg（MKV 那套还要 mkvtoolnix），测试片自己生成（见各文件开头）。全部测量、坑和调试方法在 [`CLAUDE.md`](CLAUDE.md)。
 
 ## 目录
@@ -94,6 +119,7 @@ app/          客户端（ES5，没有构建步骤；mtcute 打成 js/tg.bundle.
   js/app.js      界面和遥控器：登录、网格、播放器、菜单、下一集、搜索
   js/i18n.js     界面语言：中文 / 英文
   js/accounts.js 多账号：每个账号一个会话库，每人一份的本地记录
+  js/apikey.js   用哪组 Telegram API ID：安装包带的，或者电视上填的
   js/tg.js       Telegram 这一层：来源、视频（当视频发的和当文件发的）、搜索、字幕文件、给播放器的数据源
   js/player.js   MSE 播放引擎
   js/mp4.js      渐进式 MP4 → fMP4
@@ -104,7 +130,7 @@ app/          客户端（ES5，没有构建步骤；mtcute 打成 js/tg.bundle.
 build/        mtcute 的打包入口（后台线程 + 主线程两份）
 spike/        可行性探测和引擎测量脚本，不进包
 test/         桌面测试
-tools/        部署、日志收集
+tools/        部署、发布包（release.sh）、日志收集
 CLAUDE.md     全部发现、坑，以及怎么在零售机上调试
 ```
 

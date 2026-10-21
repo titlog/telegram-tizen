@@ -99,10 +99,34 @@ Download speed is Telegram's, not your connection's: without Premium the TV meas
 ten times the bitrate of the 1080p film it was measured with. High-bitrate 4K remuxes can be faster than that and will pause to
 buffer. The TV connects to Telegram over WebSocket (`*.web.telegram.org`); there is no proxy setting.
 
-## Install (from source)
+## Install
 
-Samsung's store does not accept third-party clients, so this is sideloaded. There is no prebuilt package: the
-Telegram API ID it signs in with is baked into the package at build time, and it has to be your own.
+Samsung's store does not accept third-party clients, so this is sideloaded. **It only has to be done once**; after
+that the app opens from the TV like any other. Two ways:
+
+| | Release package (recommended) | From source |
+|---|---|---|
+| For | just watching on the TV | changing the code, reading the diagnostic logs |
+| Needs | a computer (Windows / macOS / Linux) **or an Android phone** with [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung) | macOS, Node, the Tizen Studio command-line tools, and a Telegram API ID of your own |
+| Updating | install the newer `.wgt` the same way; the sign-in and watch history are kept | `git pull`, then `deploy.sh` again |
+
+**Both start with this:** enable Developer Mode on the TV — on the Apps screen type `12345` on the remote, switch it on,
+set Host PC IP to the computer or phone you install from — then **power-cycle the set** (unplug it). Samsung TVs from
+2023 on only accept Samsung-issued certificates; both ways obtain one for you.
+
+### Release package
+
+1. Download `telegram-tizen-<version>.wgt` from [Releases](https://github.com/titlog/telegram-tizen/releases/latest).
+2. Install [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung/releases) (desktop or Android).
+3. Open it, pick your TV (or type its IP), choose a custom `.wgt`, select the file from step 1 and install. The first
+   time it asks you to sign in to a Samsung account so it can get a certificate for this TV.
+4. Open "TG Video" on the TV; on your phone open Telegram → **Settings → Devices → Link Desktop Device** and scan the code.
+
+The release package ships with this project's Telegram API ID, so it signs in straight away. Should Telegram ever stop
+accepting it, the app asks for one of your own from [my.telegram.org](https://my.telegram.org) (the TV shows a code that
+opens it), once.
+
+### From source
 
 You need **macOS**, Node, and the [Tizen Studio](https://developer.tizen.org/development/tizen-studio/download)
 command-line tools (not the IDE).
@@ -131,12 +155,17 @@ command-line tools (not the IDE).
 
 To update: `git pull`, then run `deploy.sh` again. Your session and watch history are kept.
 
+> **Don't switch between the two.** They are signed with different certificates, and the TV will not let a package
+> signed with one replace the same app signed with the other. To switch, delete the old one on the TV first — which
+> clears the sign-in and watch history.
+
 ## Accounts and privacy
 
 - You sign in by QR code; the session is stored in the TV's IndexedDB and goes through no other server. Each account
   has its own database. Switching accounts needs no password — anyone holding the remote can switch. Signing an
   account out ends that session on Telegram's side and deletes that person's records from the TV.
-- The API ID and hash are your own and only go into your own package.
+- The release package ships with this project's API ID and hash; built from source, it uses your own, which only go into
+  your own package. One entered on the TV (if the built-in one stops working) is stored on the TV only.
 - The deploy script writes **your computer's LAN address** into the package as the destination for diagnostic
   logs; nothing is received unless you are running the collector on that computer.
 - Web sign-in (some site lists need it): the password is not stored or logged; only the account number the site
@@ -161,6 +190,7 @@ mkvtoolnix for the MKV set), with the commands at the top of each script:
 | `check-mkv.mjs` | MKV parser frame by frame against ffprobe, including lacing, header stripping, missing Cues |
 | `check-subs.mjs` | subtitle encodings and formats; PGS rendering compared pixel by pixel with ffmpeg |
 | `i18n.mjs` | every interface string has an English translation |
+| `apikey.mjs` | where the API ID comes from, and the screen for entering one |
 | `run.mjs` | the playback engine in Chromium over a throttled server that imitates Telegram |
 | `ui-emu.mjs` | the whole interface with fake data, driven by key presses, with screenshots (`UILANG=en` for English) |
 | `readme-shots.mjs` | retakes the screenshots above (`UILANG=en` for these, without it the Chinese set) |
@@ -174,6 +204,7 @@ app/              the client (no build step; mtcute is bundled into js/tg.bundle
   js/app.js         screens and remote keys: sign-in, grid, player, menu, next episode, search
   js/i18n.js        interface language: English / Chinese
   js/accounts.js    several accounts: one session database each, per-person local records
+  js/apikey.js      which Telegram API ID to use: the one the package ships with, or one entered on the TV
   js/tg.js          the Telegram layer: chats, videos (sent as videos and as files), search, subtitle files
   js/player.js      MSE playback engine
   js/mp4.js         progressive MP4 → fragmented MP4
@@ -184,7 +215,7 @@ app/              the client (no build step; mtcute is bundled into js/tg.bundle
 build/            mtcute's bundle entry points (worker and main thread)
 spike/            feasibility probes and engine measurements, not packaged
 test/             desktop tests
-tools/            deploy and log collector
+tools/            deploy, release package (release.sh), log collector
 CLAUDE.md         findings, pitfalls, and how to debug on a retail set
 ```
 

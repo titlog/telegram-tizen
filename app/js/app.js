@@ -52,6 +52,13 @@
         var t0 = performance.now();
         var dropped = await Accounts.cleanup();
         if (dropped.length) { R("退出的账号留下的库：" + dropped.join("，")); }
+        /* 包里没带 API ID / Hash（deploy.sh --noapi），又没填过：先填（apikey.js）。发布包和从源码装的都带着，平时不会走到这里 */
+        if (!ApiKey.get()) {
+            R("包里没带 API ID / Hash，也没填过，等用户在电视上填");
+            await askApi("", null);
+            t0 = performance.now();
+        }
+        var api = ApiKey.get();
         try {
             await TG.init();
         } catch (e) {
@@ -63,9 +70,25 @@
             S.screen = "bootfail";
             return;
         }
-        R("连上 Telegram " + Math.round(performance.now() - t0) + "ms，mtcute 在 " + TG.mode() + "；界面 " + I18n.lang + "（" + I18n.why + "，系统语言 " + I18n.sys + "）");
+        R("连上 Telegram " + Math.round(performance.now() - t0) + "ms，mtcute 在 " + TG.mode() + "；界面 " + I18n.lang + "（" + I18n.why + "，系统语言 " + I18n.sys + "）" +
+          "；API ID 是" + (api.from === "build" ? "安装包里带的" : "电视上填的"));
         var acct = Accounts.active(), me = await TG.me();
-        if (!me) { await login(); me = await TG.me(); }
+        if (!me) {
+            try { await login(); }
+            catch (e) {
+                /* Telegram 不认这组（连接、getMe 都不验它，扫码这一步才验）：电视上填的 → 带着刚填的回到填写页改；
+                 * 包里带的（被停用了）→ 空着的填写页，填自己申请的。填好了重新来过 */
+                if (!ApiKey.rejected(e)) { throw e; }
+                R("Telegram 不认" + (api.from === "tv" ? "电视上填的" : "安装包里带的") + " API ID / Hash：" + errStr(e) + "，转到填写页");
+                $("panel").classList.remove("on");
+                var why = e.text || errStr(e);
+                await askApi(api.from === "tv" ? T("Telegram 不认这组 API ID / Hash（{0}）。对着 my.telegram.org 核对一下再填。", why) :
+                    T("Telegram 不再接受这个安装包带的 API ID（{0}）。填你自己申请的就能接着用。", why), api.from === "tv" ? api : null);
+                location.reload();
+                return;
+            }
+            me = await TG.me();
+        }
         /* 认人的判据是 Telegram 答的用户编号，不是「认不认得出一个人」（bilibili 那边就是这么漏过去的）；名字也只从这里来 */
         var verdict = Accounts.describe(acct.id, me);
         var dup = Accounts.duplicateOf(acct.id);
@@ -175,6 +198,67 @@
         }, askPassword, function () { toast(T("两步验证密码不对，再输一次")); });
         R("扫码登录成功（出了 " + n + " 张码）");
         $("panel").classList.remove("on");
+    }
+
+    /* 填 API ID / Hash（apikey.js）：填好、格式对了才 resolve；对不对要到扫码那一步 Telegram 才说（boot 里接着）。prev：上次填的，改一两个字就行 */
+    function askApi(msg, prev) {
+        S.screen = "api";
+        $("home").classList.add("hide");
+        $("api-qr").innerHTML = TGLib.qrSvg("https://my.telegram.org/apps", 8);
+        $("api-id").value = prev ? String(prev.id) : "";
+        $("api-hash").value = prev ? prev.hash : "";
+        $("api-msg").textContent = msg || "";
+        $("api").classList.add("on");
+        setTimeout(function () { $(prev ? "api-hash" : "api-id").focus(); }, 50);
+        return new Promise(function (resolve) { S.apiDone = resolve; });
+    }
+    function submitApi() {
+        var c = ApiKey.check($("api-id").value, $("api-hash").value);
+        if (!c.idOk) {
+            $("api-msg").textContent = c.id ? T("App api_id 是一串数字，现在填的是「{0}」", c.id) : T("先填 App api_id");
+            $("api-id").focus();
+            return;
+        }
+        if (!c.hashOk) {
+            $("api-msg").textContent = !c.hash ? T("再填 App api_hash") : /[^0-9a-f]/.test(c.hash) ? T("App api_hash 只有 0–9 和 a–f，里面有别的字") :
+                T("App api_hash 是 32 位，现在是 {0} 位", c.hash.length);
+            $("api-hash").focus();
+            return;
+        }
+        if (!ApiKey.set(c.id, c.hash)) { $("api-msg").textContent = T("存不下来（电视的存储出错了）"); return; }
+        R("API ID / Hash 在电视上填好了（格式对，Telegram 认不认要到扫码时才知道）");
+        try { document.activeElement.blur(); } catch (e) {}
+        $("api").classList.remove("on");
+        $("home").classList.remove("hide");
+        S.screen = "boot";
+        var done = S.apiDone;
+        S.apiDone = null;
+        if (done) { done(); }
+    }
+    /* 13 = 确认，65376 = 屏幕键盘上的「完成」：api_id 那一栏去下一栏，api_hash 那一栏交 */
+    ["api-id", "api-hash"].forEach(function (id) {
+        $(id).addEventListener("keydown", function (e) {
+            if (e.keyCode !== 13 && e.keyCode !== 65376) { return; }
+            e.preventDefault();
+            e.stopPropagation();      // 不然冒泡到 document 的按键处理，又交一次
+            if (id === "api-id" && this.value.trim() && !$("api-hash").value.trim()) { $("api-hash").focus(); }
+            else { submitApi(); }
+        });
+    });
+    function apiKey(k) {
+        var inInput = document.activeElement && document.activeElement.tagName === "INPUT";
+        if (k === 10009) {
+            /* 输入框里按返回先收起键盘；不在输入框里，没有凭证什么都做不了，按两次退出 */
+            if (inInput) { document.activeElement.blur(); return; }
+            if (Date.now() - S.backAt < 2000) { exitApp(); return; }
+            S.backAt = Date.now();
+            toast(T("再按一次返回键退出"));
+            return;
+        }
+        if (inInput) { return; }
+        if (k === 38) { $("api-id").focus(); }
+        else if (k === 40) { $("api-hash").focus(); }
+        else if (k === 13) { submitApi(); }
     }
 
     function askPassword() {
@@ -1471,6 +1555,7 @@
         var k = e.keyCode;
         if (S.screen === "password") { return; }
         if (S.screen === "weblogin") { webLoginKey(k); return; }
+        if (S.screen === "api") { apiKey(k); return; }
         if (S.screen === "search") { searchKey(k); return; }
         if (S.screen === "bootfail") { if (k === 13) { location.reload(); } else if (k === 10009) { exitApp(); } return; }
         if (S.screen === "login") { if (k === 10009) { leaveLogin(); } return; }

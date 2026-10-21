@@ -3,7 +3,14 @@
 # 电视、证书、签名档沿用 bilibili-tizen 的（~/.bilibili-tizen.conf、签名档 SamsungBili）——同一台电视、
 # 同一张分发证书，证书按设备签，不按应用签。Telegram 凭证在 ~/.telegram-tizen.conf（不进仓库）。
 #   zsh tools/deploy.sh
+#   zsh tools/deploy.sh --noapi    不写凭证：和发布包一样，第一次打开要在电视上填 API ID / Hash（apikey.js）；测完装回正常构建
 set -e
+NOAPI=""
+for a in "$@"; do
+  case "$a" in
+    --noapi) NOAPI=1 ;;
+  esac
+done
 
 ROOT="${0:A:h:h}"
 APP="$ROOT/app"
@@ -47,9 +54,13 @@ restore() {
     -e 's#^var TG_API_HASH = "[^"]*";#var TG_API_HASH = "";#' "$CFG"
 }
 trap restore EXIT
-sed -i '' -E -e "s#^var REPORT_TO = \"[^\"]*\";#var REPORT_TO = \"http://$HOST_IP:$PORT\";#" \
-  -e "s#^var TG_API_ID = [0-9]+;#var TG_API_ID = $TG_API_ID;#" \
-  -e "s#^var TG_API_HASH = \"[^\"]*\";#var TG_API_HASH = \"$TG_API_HASH\";#" "$CFG"
+sed -i '' -E -e "s#^var REPORT_TO = \"[^\"]*\";#var REPORT_TO = \"http://$HOST_IP:$PORT\";#" "$CFG"
+if [ -n "$NOAPI" ]; then
+  echo "  --noapi：包里不带 API ID / Hash，电视上第一次打开要填（已经填过的话用填过的）"
+else
+  sed -i '' -E -e "s#^var TG_API_ID = [0-9]+;#var TG_API_ID = $TG_API_ID;#" \
+    -e "s#^var TG_API_HASH = \"[^\"]*\";#var TG_API_HASH = \"$TG_API_HASH\";#" "$CFG"
+fi
 
 echo "== packaging =="
 cd "$APP"

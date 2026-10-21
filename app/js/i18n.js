@@ -47,6 +47,24 @@ var I18n = (function () {
             "Find videos in all your groups and channels — titles, captions and file names all count.<br>" +
             "Type with the remote and press “Done” on the on-screen keyboard. Press Back to cancel.",
         "最近搜过（按 ↓ 选）": "Recent searches (press ↓ to choose)",
+        "填你自己的 Telegram API ID": "Enter your own Telegram API ID",
+        "这台电视要用一组你自己的 Telegram API ID 才能连上。只要填一次，只存在这台电视上。<br>用手机扫右边的码打开 my.telegram.org，用你的手机号登录，点「API development tools」，随便填个名字建一个应用，把 App api_id 和 App api_hash 填在下面。<br>用遥控器输入，输完按屏幕键盘上的「完成」。":
+            "This TV needs a Telegram API ID of your own to connect. You enter it once; it stays on this TV.<br>" +
+            "Scan the code on the right to open my.telegram.org, sign in with your phone number, choose “API development tools”, create an app (any name will do) " +
+            "and enter its App api_id and App api_hash below.<br>Type with the remote and press “Done” on the on-screen keyboard.",
+
+        /* ---------- API ID / Hash（apikey.js） ---------- */
+        "Telegram 不认这组 API ID / Hash（{0}）。对着 my.telegram.org 核对一下再填。":
+            "Telegram did not accept this API ID / Hash ({0}). Check them against my.telegram.org and try again.",
+        "Telegram 不再接受这个安装包带的 API ID（{0}）。填你自己申请的就能接着用。":
+            "Telegram no longer accepts the API ID this package ships with ({0}). Enter one of your own to keep using the app.",
+        "App api_id 是一串数字，现在填的是「{0}」": "App api_id is a number; what is entered now is “{0}”",
+        "先填 App api_id": "Enter the App api_id first",
+        "再填 App api_hash": "Now enter the App api_hash",
+        "App api_hash 只有 0–9 和 a–f，里面有别的字": "App api_hash only has 0–9 and a–f, and this has other characters",
+        "App api_hash 是 32 位，现在是 {0} 位": "App api_hash is 32 characters long; this is {0}",
+        "存不下来（电视的存储出错了）": "Could not save it (the TV's storage failed)",
+        "没有 API ID / Hash": "No API ID / Hash",
 
         /* ---------- 启动、登录、来源 ---------- */
         "连不上 Telegram": "Can't reach Telegram",

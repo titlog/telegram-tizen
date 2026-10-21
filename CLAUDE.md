@@ -12,18 +12,21 @@ app/js/player.js  播放引擎：MediaSource + 音视频两个 SourceBuffer，�
 app/js/mp4.js     自己写的渐进式 MP4 → fMP4：样本表 TypedArray、二分找关键帧、拼 moof+mdat（替掉了 mp4box）；也认 tx3g 字幕轨
 app/js/mkv.js     自己写的 MKV / WebM：读头和 Cues、按 Cluster 顺序拆块、算解码时间，交给 Mp4.fragmentFrames
 app/js/accounts.js  多账号：每个账号一个会话库（tg-session、tg-session-2…），每人一份的本地记录（scope），切换 = 重新加载
+app/js/apikey.js  用哪组 API ID / Hash：电视上填过的 → 包里明文的（deploy.sh）→ 包里打乱过的（release.sh）；Telegram 拒了就回填写页
 app/js/i18n.js    界面语言：中文原句当键查英文（T("…")），跟系统语言、来源栏最下面切换
 app/js/subs.js    字幕：外挂文件（SRT/ASS/VTT，GBK/Big5 自动认）、tx3g、MKV 的文字和 PGS 图形字幕、画到屏幕上
 app/js/web.js     网页链接：按站点规则解析出视频地址（XHR，不行就隐藏框）、hls.js 放（vendor/hls.min.js）；列表页当来源、翻页、登录查账号编号
 app/js/sites.local.js  站点规则（Web.register），本机自己写，不进仓库
 app/js/store.js   本地：看到哪里（localStorage，按账号分开）、上次的来源、moov 缓存（IndexedDB，留 12 个，整台电视共用）
 build/src/        mtcute 打包：worker.js（后台线程里的客户端）先打成文本，嵌进 entry.js（主线程的端口 + 二维码）
-tools/deploy.sh   打包、写入上报地址和凭证、签名、安装、启动；打完包把凭证改回空值
+tools/deploy.sh   打包、写入上报地址和凭证、签名、安装、启动；打完包把凭证改回空值（--noapi 不写凭证，测填写页）
+tools/release.sh  给陌生人的发布包 → dist/：git archive HEAD + 现打 mtcute，凭证打乱后写进去，一次性作者证书，读回验证
 tools/collect.mjs 日志收集，:8097（抖音 :8098、bilibili :8099）
 test/check.mjs    mp4.js 离线校验（对照 ffprobe，拼出来的 fMP4 交给 ffmpeg 解码）
 test/check-mkv.mjs  mkv.js 离线校验（测试片 test/media/mkv/，生成命令在文件头；要 ffmpeg + mkvtoolnix）
 test/check-subs.mjs subs.js 校验（编码、格式、tx3g、MKV 块；PGS 和 ffmpeg 的渲染逐像素比）
 test/i18n.mjs     界面每句话都有英文、占位符对得上；app.js 里往屏幕上写的地方没有漏套 T
+test/apikey.mjs   API ID 从哪来、填写页：没带 / 带的被拒 / 打乱过的 / 能用，键盘真敲进输入框（假 Telegram 层，截图 logs/api-*.png）
 test/run.mjs      播放引擎桌面测试（Playwright + test/serve.mjs 限速模拟电视）
 test/web.mjs      网页链接那条路：真网站解析 → hls.js 放 → 跳转（NOXHR=1 走隐藏框）
 test/weblist.mjs  网页列表：真网站取第一页再翻两页；要登录的列表应报 needLogin
@@ -41,6 +44,8 @@ node test/check.mjs test/media/*.mp4             # 改 mp4.js 之后（测试片
 node test/check-mkv.mjs test/media/mkv/*.mkv test/media/mkv/*.webm   # 改 mkv.js 之后
 node test/check-subs.mjs                         # 改 subs.js 之后
 node test/i18n.mjs                               # 改了界面上的字之后
+node test/apikey.mjs                             # 改 apikey.js、填写页、登录出错的处理之后（UILANG=en 英文）
+zsh tools/release.sh                             # 发布包 → dist/telegram-tizen-<版本>.wgt
 node test/serve.mjs & node test/run.mjs media/a_h264_fast.mp4 "media/b_h264_moovend.mp4?start=30"   # 改 player.js 之后
 node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv / ONLY=acct 只跑那一段，UILANG=en 英文界面）
 ```
@@ -262,3 +267,26 @@ PGS 一个显示集几 KB 到几十 KB、蓝光 remux 常带四五条：定下�
 - 电视上（10-18 14:37）：升级上去原来的会话就是 a1，getMe 对上，不用重新扫码，启动到主页 2.4 秒。添加第二个账号、切换、退出：用户 14:38 说试过没问题，
   但日志里没有「添加账号」「切换账号」「账号：2 个」这些行 —— **当作还没在电视上验证**。
 
+## 发布包和 API ID（2026-10-21，issue #1：「为什么不发 .wgt」）
+
+以前只能从源码装，因为包里要有 API ID / Hash。查 Telegram 的规定（core.telegram.org/api/obtaining_api_id、/api/terms）：**发布出去的应用
+用发布者自己申请的那组**，用户不用各自申请；一个手机号只能有一个 API ID；违规时先通知负责的账号，10 天不改才停掉。Hash 藏不住 ——
+Telegram 官方 Android 客户端的源码里就写着它自己的（`APP_ID = 4`），闭源客户端也得把它放在包里。用户（10-21）定的：**像 Nicegram 那样
+内置这个项目的那组，填写页兜底**，并且「别泄露明文」。
+- **包里怎么带**：deploy.sh 给自己电视打的包是明文（`TG_API_ID` / `TG_API_HASH`）；release.sh 打的发布包只写 `TG_API_PACKED`
+  （8 字节随机盐 + 逐字节异或，base64），`apikey.js` 的 `unpack()` 解。**不是加密**，挡的是解压之后 grep、扫 32 位十六进制串。
+  release.sh 读回：包里每个文件都没有明文 hash，config.js 里没有 ID 的数字，用 apikey.js 本身解开就是 `~/.telegram-tizen.conf` 那一组。
+  **ID / Hash 不进仓库、不进日志、不进 issue 和发布说明**（`test/apikey.mjs` 查日志里没有 hash）。
+- **顺序**：电视上填过的 → 包里明文的 → 包里打乱过的。填过的只在包里那组被拒之后才有，所以填过的优先。
+- **被拒在哪一步**（桌面上用真的 mtcute、真的 Telegram、一组编出来的凭证量的，主线程和后台线程一样）：`connect()` 成功，`getMe` 回
+  `AUTH_KEY_UNREGISTERED`（还没登录，正常），**扫码登录的第一个请求才回 `400 API_ID_INVALID`**。所以 boot 里只在 `login()` 出错时认它
+  （`ApiKey.rejected`）：电视上填的 → 带着刚填的回填写页；包里带的 → 空的填写页，「不再接受这个安装包带的 API ID」。被**停用**的
+  API ID 回什么没量过（手里没有这样一组），按同一个错认；已经登录着的会话在那种情况下还能不能用，也不知道。
+- **填写页**（`#api`，照网页登录那一页做）：两栏 App api_id / App api_hash，右边一个去 my.telegram.org/apps 的码；输入框里方向键归屏幕
+  键盘，「完成」（65376）/ 确认去下一栏或交；返回先收键盘，再按两次退出。格式不对当场说哪里不对（不是数字、几位、有 a–f 以外的字），
+  hash 去空白、转小写。
+- 测过的：`test/apikey.mjs` 全过（中英各一遍）；真的 Telegram（scratchpad 里的一次性脚本，不进仓库）：编出来的那组扫码时被拒、回填写页，
+  项目那组、打乱过的那组都出了登录二维码；`ui-emu.mjs` 全过。电视上（10-21）：`--noapi` 装上，日志「包里没带 API ID / Hash，也没填过，
+  等用户在电视上填」；装回正常构建，「API ID 是安装包里带的」、账号对上、2.6 秒到主页。**在电视上用遥控器和屏幕键盘真的填一遍还没做过**
+  （搜索框、网页登录用的是同一套输入法，都在电视上用过）。
+- 发布包没有自动更新（bilibili / 抖音那套没搬过来），升级要再装一次新的 `.wgt`；同一张三星证书签的包覆盖安装，会话和本地记录都留着。

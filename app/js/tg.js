@@ -18,10 +18,12 @@ var TG = (function () {
         return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error(tx("{0} {1} 秒没回", tx(what), ms / 1000))); }, ms); })]);
     }
 
-    /* mtcute 默认在后台线程（见 build/src/worker.js）；15 秒连不上就退回主线程直连。会话在当前账号的库里（accounts.js） */
+    /* mtcute 默认在后台线程（见 build/src/worker.js）；15 秒连不上就退回主线程直连。会话在当前账号的库里（accounts.js）。
+     * API ID / Hash：安装包里的（从源码装），或者电视上填的（发布包），见 apikey.js */
     async function init() {
-        var storage = Accounts.active().storage;
-        var r = await TGLib.create(TG_API_ID, TG_API_HASH, undefined, storage);
+        var storage = Accounts.active().storage, api = ApiKey.get();
+        if (!api) { throw new Error(tx("没有 API ID / Hash")); }
+        var r = await TGLib.create(api.id, api.hash, undefined, storage);
         client = r.client;
         remake = r.reconnect || null;
         mode = r.mode;
@@ -30,7 +32,7 @@ var TG = (function () {
         } catch (e) {
             if (mode !== "worker") { throw e; }
             mode = "direct（后台线程：" + e.message + "）";
-            client = (await TGLib.create(TG_API_ID, TG_API_HASH, "direct", storage)).client;
+            client = (await TGLib.create(api.id, api.hash, "direct", storage)).client;
             remake = null;     // 主线程直连没有后台线程，也就没有「连接作废」
             await client.connect();
         }
