@@ -345,3 +345,6 @@ booting）；装回 1.1.0 → `下载过的 1.0.1 不比安装包 1.1.0 新，�
    —— tag 要一起推：manifest 从 master 取，bundle 从 tag 取。
 3. `zsh tools/release.sh` 出 wgt，`gh release create`，说明中英双份。
 4. 装着 1.1.0 以后版本的电视会自己更新。
+5. 不用管 Apps2Samsung 的社区目录（README 里推荐的装法）：它每天按 `releases/latest` 自己取新的 wgt
+   （`Apps2Samsung/tizen-community-packages` 的 `packages/titlog__telegram-tizen.json`，按 `telegram-tizen-.*[.]wgt$` 挑资产），
+   所以 wgt 要一直叫 `telegram-tizen-<版本>.wgt`。

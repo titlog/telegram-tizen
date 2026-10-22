@@ -59,21 +59,29 @@
 |---|---|---|
 | 适合 | 只想在电视上看 | 要改代码、要看诊断日志 |
 | 需要 | 电脑（Windows / macOS / Linux）**或安卓手机**，装上 [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung) | macOS、Node、Tizen Studio 命令行工具，以及你自己申请的 Telegram API ID |
-| 升级 | **1.1.0 起自动更新**；1.0.0 要再装一次新版 `.wgt`（扫码登录和看到哪里都留着） | `git pull`，再跑一次 `deploy.sh` |
+| 升级 | **1.1.0 起自动更新**；1.0.0 要用 Apps2Samsung 再装一次（扫码登录和看到哪里都留着） | `git pull`，再跑一次 `deploy.sh` |
 
 **两条路都要先做这一步：** 电视上打开开发者模式——在「应用」页面用遥控器输入 `12345`，打开开关，Host PC IP 填装应用的
-那台电脑或手机的 IP——然后**把电视完整断电重启一次**。2023 年以后的三星电视只认三星签发的证书，两条路都会替你申请。
+那台电脑或手机的 IP——然后**把电视完整断电重启一次**。
+
+两条路都还要一个三星账号（没有就免费注册一个）：第一次安装时会让你登录，用来给这台电视申请证书，之后不用再管。
 
 ### 装发布包
 
-1. 到 [Releases](https://github.com/titlog/telegram-tizen/releases/latest) 下载 `telegram-tizen-<版本>.wgt`。
-2. 装 [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung/releases)，电脑版、安卓版都行。
-3. 打开它，选中你的电视（列表里没有就手动输入电视的 IP），应用选自定义 `.wgt`，选第 1 步下载的文件，安装。第一次会让你
-   登录三星账号，替这台电视签证书。
+1. 装 [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung/releases)，电脑版、安卓版都行。
+2. 打开它，选中你的电视（列表里没有就手动输入电视的 IP）。
+3. 在它的应用列表（社区目录）里找到 **Telegram Videos**，安装。第一次会让你登录三星账号，替这台电视签证书。
 4. 电视上打开「TG 视频」，手机打开 Telegram → 设置 → 设备 → 关联桌面设备，扫码。
+
+社区目录每天从这里同步一次最新的发布包。想装目录还没同步到的新版本，或者某个指定版本：到
+[Releases](https://github.com/titlog/telegram-tizen/releases/latest) 下载 `telegram-tizen-<版本>.wgt`，第 3 步改选自定义
+`.wgt`，选这个文件。
 
 发布包带着这个项目的 Telegram API ID，装上就能扫码。万一哪天 Telegram 不再接受它，应用会请你填一组自己在
 [my.telegram.org](https://my.telegram.org) 申请的（电视上有去那里的二维码），填一次就行。
+
+**只有 iPhone？** Apps2Samsung 没有 iOS 版，侧载要一台电脑或者一部安卓手机。不过只需要装一次（之后新版本电视自己装），
+借一台电脑装一次就够了。
 
 ### 从源码装
 

@@ -113,23 +113,32 @@ that the app opens from the TV like any other. Two ways:
 |---|---|---|
 | For | just watching on the TV | changing the code, reading the diagnostic logs |
 | Needs | a computer (Windows / macOS / Linux) **or an Android phone** with [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung) | macOS, Node, the Tizen Studio command-line tools, and a Telegram API ID of your own |
-| Updating | **updates itself from 1.1.0**; on 1.0.0 install the newer `.wgt` once more (the sign-in and watch history are kept) | `git pull`, then `deploy.sh` again |
+| Updating | **updates itself from 1.1.0**; on 1.0.0 install it once more with Apps2Samsung (the sign-in and watch history are kept) | `git pull`, then `deploy.sh` again |
 
 **Both start with this:** enable Developer Mode on the TV — on the Apps screen type `12345` on the remote, switch it on,
-set Host PC IP to the computer or phone you install from — then **power-cycle the set** (unplug it). Samsung TVs from
-2023 on only accept Samsung-issued certificates; both ways obtain one for you.
+set Host PC IP to the computer or phone you install from — then **power-cycle the set** (unplug it).
+
+Both ways also need a Samsung account (free to create): the first install asks you to sign in, to get this TV
+a certificate, and that is all.
 
 ### Release package
 
-1. Download `telegram-tizen-<version>.wgt` from [Releases](https://github.com/titlog/telegram-tizen/releases/latest).
-2. Install [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung/releases) (desktop or Android).
-3. Open it, pick your TV (or type its IP), choose a custom `.wgt`, select the file from step 1 and install. The first
-   time it asks you to sign in to a Samsung account so it can get a certificate for this TV.
+1. Install [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung/releases) (desktop or Android).
+2. Open it and pick your TV (or type its IP).
+3. Find **Telegram Videos** in its app list (the community catalog) and install it. The first time it asks you to sign
+   in to a Samsung account so it can get a certificate for this TV.
 4. Open "TG Video" on the TV; on your phone open Telegram → **Settings → Devices → Link Desktop Device** and scan the code.
+
+The catalog picks up the latest release from here once a day. For a version it has not picked up yet, or a specific
+one, download `telegram-tizen-<version>.wgt` from [Releases](https://github.com/titlog/telegram-tizen/releases/latest)
+and choose a custom `.wgt` in step 3 instead.
 
 The release package ships with this project's Telegram API ID, so it signs in straight away. Should Telegram ever stop
 accepting it, the app asks for one of your own from [my.telegram.org](https://my.telegram.org) (the TV shows a code that
 opens it), once.
+
+**Only an iPhone?** Apps2Samsung has no iOS version; sideloading takes a computer or an Android phone. It is needed once
+(after that the TV installs new versions itself), so borrowing a computer for the install is enough.
 
 ### From source
 
