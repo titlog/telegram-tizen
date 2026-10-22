@@ -1669,7 +1669,7 @@
         Diag.incident("启动出错：" + errStr(e));
     });
 
-    /* 自动更新（update.js）：先报这次跑的是哪份代码、为什么，一分钟后查，之后最多每六小时；第一次跑一个新下载的版本时提示一次 */
+    /* 自动更新（update.js）：先报这次跑的是哪份代码、为什么，每次开机一分钟后查，开着每六小时；第一次跑一个新下载的版本时提示一次 */
     try { Update.init({ report: Log.report, notice: function () { toast(T("已更新到 {0}", Boot.info().running), 4000); } }); }
     catch (e) { R("Update.init 抛异常：" + errStr(e)); }
     /* 这次启动 boot.js 扔掉了一个走不到首页的更新包。观众什么都看不到（照常跑安装包），开发者只能从这里知道 */
