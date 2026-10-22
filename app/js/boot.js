@@ -27,7 +27,7 @@ var Boot = (function () {
     var SHELL = 1;
 
     /* 安装包的版本，给没有 tizen.application 的引擎（桌面浏览器）用。tools/update-verify.mjs 卡着它和 config.xml 一致。 */
-    var PACKAGED_FALLBACK = "1.1.0";
+    var PACKAGED_FALLBACK = "1.1.1";
 
     /* ECDSA P-256 公钥，SPKI，base64。tools/update-key.mjs 写进来；私钥永远不进仓库。 */
     var PUBKEY = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEE9Z+Uan4otX60X0tFBnW0SeeG9d3GWpAiSJ1Mbk5dygmDUiO+UGhz5hNArZx6/pRtqLERnErGWAWFnrDsCAlDw==";
