@@ -79,7 +79,8 @@ const bundleBytes = Buffer.from(JSON.stringify(bundle), "utf8");
 const base = opt("--base");
 const urls = base
   ? [base.replace(/\/?$/, "/") + bundleName]
-  : ["https://cdn.jsdelivr.net/gh/titlog/telegram-tizen@v" + version + "/update/" + bundleName,
+  : ["https://diag.titdev.nl/v1/update/telegram-tizen/" + bundleName,   /* relays the tag's copy; see update.js */
+     "https://cdn.jsdelivr.net/gh/titlog/telegram-tizen@v" + version + "/update/" + bundleName,
      "https://raw.githubusercontent.com/titlog/telegram-tizen/v" + version + "/update/" + bundleName];
 
 const manifest = JSON.stringify({
