@@ -73,7 +73,7 @@ var TG = (function () {
     /* onUrl(url, expires) 每换一张码调一次；askPassword() → Promise<string>（两步验证）。
      * 扫码页上挂到后台一分钟以上（电视待机也是）：后台线程把这条连接作废，等着的 signInQr 跟着断 —— 正等一个请求时报
      * 「Worker connection expired」，在两次换码之间时报「signal is aborted without reason」（port 的 stopSignal 被中止）。
-     * 1.1.2 上 boot() 就停在这里、二维码不再换（2026-10-23 一台美国的电视；--loginexpiry 复现）。重连、重新出码，最多三次 */
+     * 1.1.2 上 boot() 就停在这里、二维码不再换（2026-10-23 一台别人的电视；--loginexpiry 复现）。重连、重新出码，最多三次 */
     async function login(onUrl, onScanned, askPassword, onBadPassword) {
         for (var tries = 0; ; tries++) {
             try {

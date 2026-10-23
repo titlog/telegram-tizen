@@ -279,7 +279,7 @@ PGS 一个显示集几 KB 到几十 KB、蓝光 remux 常带四五条：定下�
 - 界面：来源栏倒数第二项「账号：名字」→ 账号页（各账号、+ 添加账号、退出 当前的）。切换之后的提示（「已切换到 …」）跨过重新加载，用 `Store.once`。
 - 桌面测试（`ONLY=acct`）：假 Telegram 层按当前账号的库答「我是谁」（tg-session-3 故意答成第一个人），走一遍添加 → 切回 → 添加已经在的 → 扫码时按返回 →
   退出：进度按人分开（1 / 0 / 1），退出的人的进度键删了、库下次启动删了。踩了一下：按下确认就重新加载页面，测试里松开那一下没有页面可发，按键工具要容忍。
-- **扫码页上挂到后台（2026-10-23，一台美国的 Tizen 9，1.1.2）**：连上 Telegram 之后 100 秒「启动出错 signal is aborted without reason」，
+- **扫码页上挂到后台（2026-10-23，一台别人的 Tizen 9，1.1.2）**：连上 Telegram 之后 100 秒「启动出错 signal is aborted without reason」，
   栈是 port 的 `_close` ← `_onMessage`。主线程停住（挂到后台、待机）就没有心跳，**后台线程把请求也当心跳**，60 秒都没有就作废这条连接；
   回来时 port 收到 `connection_expired`、`_close`，等着的 `signInQr` 跟着断：正等一个请求时是「Worker connection expired」，两次换码之间是
   `stopSignal` 的「signal is aborted without reason」。`again()` 只管普通请求，扫码这条没管，`boot()` 停在这里、二维码不再换。
@@ -345,6 +345,7 @@ Telegram 官方 Android 客户端的源码里就写着它自己的（`APP_ID = 4
   自测构建不传，`TG_DIAG_TO=off` 不传（**这台开发机的 `~/.telegram-tizen.conf` 里写着**，换电脑要补上），`TG_DIAG_TO=<地址>` 传到那里，
   `--diag` 没给地址（或是 off）就传到这台电脑的 :8096（:8097 是这里的收集器）。
 - 桌面测试（`ui-emu` / `readme-shots` / `apikey`）里，接收端（地址从 diag.js 读）和 GitHub / jsDelivr 一律拦掉，测试不往线上传东西。
+  兜底：**桌面浏览器（UA 里没有 Tizen）的 `diag.js` 一律不传**（2026-10-23：抖音的桌面测试台没拦，传上去两条像真电视的）。
 
 **测过的（同一天）：** `update-verify`、`diag-verify` 全过（diag-verify 故意弄坏 6 处都抓到）；`ui-emu` 全过（加了设置页那一段；来源栏底下多了
 「设置」之后，旧测试按位置去「账号」落到了设置上 —— 改成按文字找）；电视 `--diag` 7 步全过，读回传上去的那份：账号名、用户 ID、群名
