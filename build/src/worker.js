@@ -3,6 +3,7 @@
  * 为什么：主线程里跑 mtcute，每块 512KB 的解密 + 校验成批到达时一卡 300–850ms（2026-10-01 电视实测，
  * 同一时刻我们自己拼分段只用了 ≤11ms）。
  * 凭证由主线程拼在脚本前面：self.TG_CFG = {apiId, apiHash, storage}。 */
+import './compat.js';   // 要在 mtcute 之前（required_version 那代引擎缺的 API）
 import { BaseTelegramClient, TelegramWorker, WebCryptoProvider } from '@mtcute/web';
 import wasmSimd from '../node_modules/@mtcute/wasm/mtcute-simd.wasm';
 import wasmPlain from '../node_modules/@mtcute/wasm/mtcute.wasm';

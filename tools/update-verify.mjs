@@ -160,7 +160,7 @@ function launch(store) {
   return { Boot: c.Boot, written, inserted, styles, linksRemoved: links.removed || 0, reloaded, kids: bodyKids };
 }
 const bundleText = JSON.stringify(bundle);
-const meta = (v, extra) => JSON.stringify(Object.assign({ version: v, shell: 1 }, extra));
+const meta = (v, extra) => JSON.stringify(Object.assign({ version: v, shell: boot.shell }, extra));
 
 let s = storage();
 let r = launch(s);
@@ -193,7 +193,7 @@ s = storage({ "tg.update.meta": meta("0.0.9"), "tg.update.bundle": JSON.stringif
 r = launch(s);
 ok(r.Boot.info().running === boot.packagedFallback && !s.getItem("tg.update.meta"), "下载的比安装包旧（手动装了新包）→ 删掉，用安装包：" + r.Boot.info().note);
 
-s = storage({ "tg.update.meta": meta("9.0.0", { shell: 2 }), "tg.update.bundle": bundleText });
+s = storage({ "tg.update.meta": meta("9.0.0", { shell: boot.shell + 1 }), "tg.update.bundle": bundleText });
 r = launch(s);
 ok(r.Boot.info().running === boot.packagedFallback && !s.getItem("tg.update.meta"), "shell 比这个 boot.js 新 → 删掉：" + r.Boot.info().note);
 

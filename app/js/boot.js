@@ -24,7 +24,7 @@ var Boot = (function () {
 
     /* 这个文件实现的更新包约定：body、按顺序的样式、按顺序的脚本（见 tools/update-release.mjs），加上安装包里的 mtcute 和 hls.js。
      * 哪一版的 boot.js 对更新包的期待变了、或者 mtcute / hls.js 换了，就把它加一；SHELL 更老的电视跳过那一版，要重装。 */
-    var SHELL = 1;
+    var SHELL = 2;
 
     /* 安装包的版本，给没有 tizen.application 的引擎（桌面浏览器）用。tools/update-verify.mjs 卡着它和 config.xml 一致。 */
     var PACKAGED_FALLBACK = "1.1.2";

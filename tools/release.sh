@@ -39,7 +39,7 @@ OUT="$ROOT/dist/telegram-tizen-$VERSION.wgt"
 echo "== release $VERSION =="
 
 # 包取自 HEAD：没提交的改动不会进去，看起来就像「修好了却没发出去」。
-if [ -n "$(git status --porcelain -- app build/src build/package.json build/package-lock.json)" ]; then
+if [ -n "$(git status --porcelain -- app build/src build/bundle.sh build/package.json build/package-lock.json)" ]; then
   echo "  app/ 或 build/ 有未提交的改动 —— 发布包取自 HEAD，这些改动不会进去。先提交或还原："
   git status --short -- app build | sed 's/^/    /'
   exit 1
@@ -119,14 +119,13 @@ vm.runInContext(fs.readFileSync(cfg, "utf8") + "\n" + fs.readFileSync(key, "utf8
 const g = ctx.got || {};
 if (g.from !== "build" || String(g.id) !== process.env.TG_ID || g.hash !== process.env.TG_HASH) { console.error("  解开 TG_API_PACKED 得到的不是这一组"); process.exit(1); }
 ' "$STAGE/app/js/config.js" "$STAGE/app/js/apikey.js" || exit 1
-[ -d "$ROOT/build/node_modules" ] || (cd "$ROOT/build" && npm ci --no-audit --no-fund)
-# 和 deploy.sh 同样两步（build/ 上面已经确认和 HEAD 一致）
-(cd "$ROOT/build" && mkdir -p out && \
-  npx esbuild src/worker.js --bundle --format=iife --target=chrome120 --loader:.wasm=binary \
-    --minify --legal-comments=none --log-level=warning --outfile=out/worker.bundle.txt && \
-  npx esbuild src/entry.js --bundle --format=iife --target=chrome120 --loader:.wasm=binary --loader:.txt=text \
-    --minify --legal-comments=none --log-level=warning --outfile="$STAGE/app/js/tg.bundle.js")
+# 和 deploy.sh 同一个脚本（build/ 上面已经确认和 HEAD 一致）
+zsh "$ROOT/build/bundle.sh" "$STAGE/app/js/tg.bundle.js"
 node --check "$STAGE/app/js/tg.bundle.js" >/dev/null || { echo "  tg.bundle.js 打出来不能解析"; exit 1; }
+# 包里每个脚本，对着 required_version 那代电视的引擎查（Tizen 6.0 = Chromium 76）
+JS=("$STAGE"/app/js/**/*.js(N))
+node "$ROOT/tools/syntax-verify.mjs" "${JS[@]}" "$ROOT/build/out/worker.bundle.txt" || { echo "  refuse to release"; exit 1; }
+node "$ROOT/test/compat.mjs" >/dev/null || { node "$ROOT/test/compat.mjs"; echo "  refuse to release"; exit 1; }
 
 echo "== packaging =="
 tizen package -t wgt -s "$PROFILE" -- "$STAGE/app" 2>&1 | grep -E "Package File Location|error" || true

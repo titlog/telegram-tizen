@@ -42,14 +42,11 @@ HOST_IP=$(ipconfig getifaddr "$NET_IF")
 [ -n "$HOST_IP" ] || { echo "拿不到 $NET_IF 的地址"; exit 1; }
 
 echo "== bundling =="
-[ -d "$ROOT/build/node_modules" ] || (cd "$ROOT/build" && npm ci --no-audit --no-fund)
-# 两步：后台线程那份（src/worker.js）先打成文本，再作为字符串嵌进主线程那份
-(cd "$ROOT/build" && mkdir -p out && \
-  npx esbuild src/worker.js --bundle --format=iife --target=chrome120 --loader:.wasm=binary \
-    --minify --legal-comments=none --log-level=warning --outfile=out/worker.bundle.txt && \
-  npx esbuild src/entry.js --bundle --format=iife --target=chrome120 --loader:.wasm=binary --loader:.txt=text \
-    --minify --legal-comments=none --log-level=warning --outfile="$APP/js/tg.bundle.js")
+zsh "$ROOT/build/bundle.sh" "$APP/js/tg.bundle.js"
 for f in "$APP"/js/*.js; do node --check "$f" >/dev/null || { echo "  syntax error in $f"; exit 1; }; done
+# node 什么都认；required_version 那代电视（Tizen 6.0 = Chromium 76）不认的写法在这里拦（1.1.2 就是这样在那几台上打不开的）
+node "$ROOT/tools/syntax-verify.mjs" || { echo "  refuse to deploy"; exit 1; }
+node "$ROOT/test/compat.mjs" >/dev/null || { node "$ROOT/test/compat.mjs"; echo "  refuse to deploy"; exit 1; }
 # 自动更新（钥匙、版本号、boot.js 每种本地状态下选对代码、mtcute / hls.js 换了 SHELL 有没有加一）、诊断日志（去隐私、什么时候传）
 for t in tools/update-verify.mjs tools/diag-verify.mjs; do
   node "$ROOT/$t" >/dev/null || { node "$ROOT/$t" | grep '✗'; echo "  refuse to deploy"; exit 1; }

@@ -85,10 +85,13 @@ export function sha256Hex(buf) {
  * vendorPrint() lets update-release.mjs enforce. */
 export const PACKAGED = ["tg.bundle.js", "vendor/hls.min.js", "sites.local.js"];
 
-/* What the packaged-only code was built from: mtcute's build inputs and the
- * hls.js file. read(path) → string (HEAD or the working tree). */
+/* What the packaged-only code was built from: mtcute's build inputs, how it is
+ * bundled (build/bundle.sh: the esbuild target — 1.1.2's chrome120 was a broken
+ * shell on Tizen 6.0, and changing it alone used to leave this print as it was)
+ * and the hls.js file. read(path) → string (HEAD or the working tree). */
 export function vendorPrint(read) {
-  const parts = ["build/package.json", "build/package-lock.json", "build/src/entry.js", "build/src/worker.js", "app/js/vendor/hls.min.js"];
+  const parts = ["build/package.json", "build/package-lock.json", "build/bundle.sh", "build/src/compat.js",
+                 "build/src/entry.js", "build/src/worker.js", "app/js/vendor/hls.min.js"];
   const h = crypto.createHash("sha256");
   for (const p of parts) { h.update(p + "\0" + read(p) + "\0"); }
   return h.digest("hex").slice(0, 16);

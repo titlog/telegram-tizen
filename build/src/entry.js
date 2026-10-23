@@ -3,6 +3,7 @@
  * - 电视上页面是 file://，Worker 不能从文件起，所以用 blob: 地址；fetch 也拿不到包里的 .wasm，
  *   所以 wasm 以字节形式打进脚本（esbuild binary loader）。
  * - 不用 <script type=module>：file:// 页面的模块脚本在 Chromium 里按跨域处理。 */
+import './compat.js';   // 要在 mtcute 之前（required_version 那代引擎缺的 API）
 import { TelegramClient, TelegramWorkerPort, WebCryptoProvider } from '@mtcute/web';
 import wasmSimd from '../node_modules/@mtcute/wasm/mtcute-simd.wasm';
 import wasmPlain from '../node_modules/@mtcute/wasm/mtcute.wasm';

@@ -24,12 +24,16 @@ app/js/web.js     网页链接：按站点规则解析出视频地址（XHR，�
 app/js/sites.local.js  站点规则（Web.register），本机自己写，不进仓库
 app/js/store.js   本地：看到哪里（localStorage，按账号分开）、上次的来源、moov 缓存（IndexedDB，留 12 个，整台电视共用）
 build/src/        mtcute 打包：worker.js（后台线程里的客户端）先打成文本，嵌进 entry.js（主线程的端口 + 二维码）
+build/src/compat.js  mtcute 用到、Chromium 76 没有的 API（AbortSignal 的 reason / throwIfAborted / any），entry、worker 第一个 import 它
+build/bundle.sh   打 mtcute 的包（deploy / release 共用）：esbuild 的 target 跟着 required_version 走（Tizen 6.0 = chrome76）
+tools/syntax-verify.mjs  包里每个脚本（含后台线程那份文本）对着 required_version 那代引擎查语法（deploy / release 卡着）
 tools/deploy.sh   打包、写入上报地址和凭证、签名、安装、启动；打完包把凭证改回空值（--noapi 不写凭证，测填写页）
 tools/update-*.mjs  自动更新：update-key（钥匙，只跑一次）、update-release（打包签名 → update/）、update-verify（离线验证，deploy / release 卡着）
 tools/diag-verify.mjs  诊断日志离线验证：去隐私、什么时候传、源码里没包起来的名字（deploy / release 卡着）
 tools/release.sh  给陌生人的发布包 → dist/：git archive HEAD + 现打 mtcute，凭证打乱后写进去，一次性作者证书，读回验证
 tools/collect.mjs 日志收集，:8097（抖音 :8098、bilibili :8099）
 test/check.mjs    mp4.js 离线校验（对照 ffprobe，拼出来的 fMP4 交给 ffmpeg 解码）
+test/compat.mjs   compat.js 在没有那些 API 的假引擎上补得对不对（deploy / release 卡着）
 test/check-mkv.mjs  mkv.js 离线校验（测试片 test/media/mkv/，生成命令在文件头；要 ffmpeg + mkvtoolnix）
 test/check-subs.mjs subs.js 校验（编码、格式、tx3g、MKV 块；PGS 和 ffmpeg 的渲染逐像素比）
 test/i18n.mjs     界面每句话都有英文、占位符对得上；app.js 里往屏幕上写的地方没有漏套 T
@@ -51,6 +55,7 @@ node test/check.mjs test/media/*.mp4             # 改 mp4.js 之后（测试片
 node test/check-mkv.mjs test/media/mkv/*.mkv test/media/mkv/*.webm   # 改 mkv.js 之后
 node test/check-subs.mjs                         # 改 subs.js 之后
 node test/i18n.mjs                               # 改了界面上的字之后
+node test/compat.mjs                             # 改 build/src/compat.js 之后（deploy 也跑）
 node test/apikey.mjs                             # 改 apikey.js、填写页、登录出错的处理之后（UILANG=en 英文）
 zsh tools/deploy.sh --diag                       # 诊断日志在电视上走一遍（7 步，1 分钟）；先开 PORT=8096 node ../bilibili-tizen/tools/diag-local.mjs
 node ../bilibili-tizen/tools/diag-logs.mjs --app telegram-tizen   # 读别人电视传上来的（--device 编号 / <id>）
@@ -339,7 +344,8 @@ booting）；装回 1.1.0 → `下载过的 1.0.1 不比安装包 1.1.0 新，�
 
 ### 发一版
 
-1. 改 `app/config.xml` 的版本号和 `app/js/boot.js` 的 `PACKAGED_FALLBACK`（要一致，update-verify 卡着），提交。改了 mtcute / hls.js 的话 `SHELL` 加一。
+1. 改 `app/config.xml` 的版本号和 `app/js/boot.js` 的 `PACKAGED_FALLBACK`（要一致，update-verify 卡着），提交。改了 mtcute / hls.js 的话 `SHELL` 加一
+   （`build/` 下的任何东西都算，包括 `bundle.sh` 的打包参数和 `compat.js`）。
 2. `node tools/update-release.mjs`（取自 `git archive HEAD`，`app/`、`build/` 有未提交改动就拒绝），
    `git add update && git commit -m "更新包 x.y.z" && git tag vx.y.z && git push origin master vx.y.z`
    —— tag 要一起推：manifest 从 master 取，bundle 从 tag 取。
@@ -348,3 +354,21 @@ booting）；装回 1.1.0 → `下载过的 1.0.1 不比安装包 1.1.0 新，�
 5. 不用管 Apps2Samsung 的社区目录（README 里推荐的装法）：它每天按 `releases/latest` 自己取新的 wgt
    （`Apps2Samsung/tizen-community-packages` 的 `packages/titlog__telegram-tizen.json`，按 `telegram-tizen-.*[.]wgt$` 挑资产），
    所以 wgt 要一直叫 `telegram-tizen-<版本>.wgt`。
+
+## Tizen 6.0 上打不开（2026-10-23，别人电视的诊断日志）
+
+两台 Tizen 6.0（Chromium 76）的电视装 1.1.2，每次启动都是「Uncaught SyntaxError: Unexpected token ( @tg.bundle.js:1」，接着
+「TGLib is not defined」（其中一台一分钟里重开了十来次）。`config.xml` 从骨架起就是 `required_version="6.0"`，esbuild 却一直是 `--target=chrome120`。
+- 1.1.2 的包里比 Chromium 76 新的写法：私有方法 `#m()` 11 处（84 起认；第一处是 @fuman/utils 的 `BufferPool` 的 `#realloc()`，报错的就是它
+  后面那个 `(`）、`??` 458 处、`?.` 389 处（80 起）。`node --check` 看不出来，开发机的 node 什么都认。
+- **语法**：`build/bundle.sh` 一处打包（deploy / release 共用），target chrome76，包大 1.5%（2.81 → 2.85MB）。`tools/syntax-verify.mjs` 用 acorn
+  解析包里每个脚本和后台线程那份文本，对着「从哪个 Chromium 起认」的表查，比 required_version 那代新就拒绝 —— 对 1.1.2 的包报出上面三样，对新包通过。
+- **API**（esbuild 降不了，`build/src/compat.js` 补；在打出来的包里一个个 grep 过）：`AbortSignal.prototype.throwIfAborted`（100 起）—— @fuman/net 连 WebSocket
+  之前就调，没有它**连不上 Telegram、不报错、一直等**；`signal.reason`（98 起）—— 没有它被取消时抛出去的是 undefined；`AbortSignal.any`（116 起）——
+  重试时合并信号。Tizen 6.5–7.0（Chromium 85–94）解析得了 1.1.2 的包，按这个推断卡在连 Telegram 那一步（没有那几代电视的日志）。
+- **桌面 Chromium 76.0.3809 实测**（快照 665002，Rosetta）：1.1.2 的包报的就是电视上那句（`1:2406`）；新包解析得了、`TGLib` 在、二维码出得来，
+  后台线程 1.5 秒连上 Telegram、回 `AUTH_KEY_UNREGISTERED`（还没登录，就是连上了）；同一份包去掉 throwIfAborted 那段补丁，`getMe` 20 秒没回。
+  后台线程要从 localhost 起：桌面上从 `file://` 起的 blob worker 没有 `crypto.subtle`（电视上页面和线程都是安全上下文，没这个问题）。
+  **Tizen 6.0 的电视上还没跑过** —— 那两台装上新版之后的诊断日志会说。
+- **换了壳**：`tg.bundle.js` 不随更新下发，`SHELL` 1 → 2。打包参数原来不在 `vendorPrint()` 里（只改 `--target` 拦不住），现在 `bundle.sh`、`compat.js`
+  都算进去。SHELL 1 的电视（装着 1.1.x 的）收不到 shell 2 的更新包，要重装一次 wgt；Tizen 6.0 上反正本来就打不开。

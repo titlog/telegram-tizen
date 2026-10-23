@@ -34,7 +34,7 @@ const OUT = opt("--out") || path.join(ROOT, "update");
 function git(...a) { return execFileSync("git", a, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 << 20 }); }
 
 if (!WORKTREE) {
-  const dirty = git("status", "--porcelain", "--", "app", "build/src", "build/package.json", "build/package-lock.json").trim();
+  const dirty = git("status", "--porcelain", "--", "app", "build/src", "build/bundle.sh", "build/package.json", "build/package-lock.json").trim();
   if (dirty) {
     console.error("✗ app/ 或 build/ 有未提交的改动 —— 更新包取自 HEAD，这些改动不会进去。先提交或还原：\n" + dirty.replace(/^/gm, "    "));
     process.exit(1);
