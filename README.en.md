@@ -180,8 +180,9 @@ To update: `git pull`, then run `deploy.sh` again. Your session and watch histor
   account out ends that session on Telegram's side and deletes that person's records from the TV.
 - The release package ships with this project's API ID and hash; built from source, it uses your own, which only go into
   your own package. One entered on the TV (if the built-in one stops working) is stored on the TV only.
-- The deploy script writes **your computer's LAN address** into the package as the destination for diagnostic
-  logs; nothing is received unless you are running the collector on that computer.
+- Built from source, the app sends diagnostic logs just like the release package (from 1.1.4), and they can be
+  switched off in Settings; or add the line `TG_DIAG_TO=off` to `~/.telegram-tizen.conf` and builds from that
+  computer send nothing.
 - Web sign-in (some site lists need it): the password is not stored or logged; only the account number the site
   returns is kept.
 

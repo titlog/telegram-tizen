@@ -5,7 +5,7 @@
 #   zsh tools/deploy.sh
 #   zsh tools/deploy.sh --noapi    不写凭证：第一次打开要在电视上填 API ID / Hash（apikey.js）；测完装回正常构建
 #   zsh tools/deploy.sh --diag     诊断日志：设置页里手动传、关掉再开、造一次出事自动传（js/selftest.js，1 分钟）；
-#                                  传到 TG_DIAG_TO，默认这台电脑上的 PORT=8096 node ../bilibili-tizen/tools/diag-local.mjs（先开着）
+#                                  传到 TG_DIAG_TO 给的地址，没给（或是 off）就传到这台电脑上的 PORT=8096 node ../bilibili-tizen/tools/diag-local.mjs（先开着）
 #   zsh tools/deploy.sh --loginexpiry  扫码页上后台线程的连接作废（挂到后台一分钟以上）：添加一个账号去扫码页、停心跳等作废，
 #                                      看是不是重连、换码；最后按返回取消添加（js/selftest.js，2 分钟）
 #   TG_UPDATE_MANIFEST=http://<这台电脑>:<端口>/manifest.json zsh tools/deploy.sh   在电视上测自动更新（只有开发构建认它）
@@ -68,7 +68,9 @@ restore() {
 trap restore EXIT
 sed -i '' -E -e "s#^var REPORT_TO = \"[^\"]*\";#var REPORT_TO = \"http://$HOST_IP:$PORT\";#" "$CFG"
 [ -n "$TG_UPDATE_MANIFEST" ] && { sed -i '' -E "s#^var UPDATE_MANIFEST = \"[^\"]*\";#var UPDATE_MANIFEST = \"$TG_UPDATE_MANIFEST\";#" "$CFG"; echo "  update manifest=$TG_UPDATE_MANIFEST"; }
-[ "$SELFTEST" = "diag" ] && TG_DIAG_TO="${TG_DIAG_TO:-http://$HOST_IP:8096/v1/upload}"
+# 诊断日志传到哪：从源码装的和发布包一样传（2026-10-23）；TG_DIAG_TO=off 不传（这个项目自己的电脑在 ~/.telegram-tizen.conf 里写着，
+# 收集器什么都有）；--diag 没给地址就传到这台电脑上的冒充接收端（配置里的 off 不算地址）。自测构建一律不传（diag.js）。
+[ "$SELFTEST" = "diag" ] && [ "${TG_DIAG_TO:-off}" = off ] && TG_DIAG_TO="http://$HOST_IP:8096/v1/upload"
 [ -n "$TG_DIAG_TO" ] && { sed -i '' -E "s#^var DIAG_TO = \"[^\"]*\";#var DIAG_TO = \"$TG_DIAG_TO\";#" "$CFG"; echo "  diag -> $TG_DIAG_TO"; }
 [ -n "$SELFTEST" ] && { sed -i '' -E "s#^var SELFTEST = \"[^\"]*\";#var SELFTEST = \"$SELFTEST\";#" "$CFG"; echo "  selftest=$SELFTEST"; }
 if [ -n "$NOAPI" ]; then
