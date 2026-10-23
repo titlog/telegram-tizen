@@ -101,6 +101,9 @@ var I18n = (function () {
         /* ---------- 启动、登录、来源 ---------- */
         "连不上 Telegram": "Can't reach Telegram",
         "检查网络后按确认重试": "Check the network, then press OK to retry",
+        "要重新安装一次": "Reinstall the app once",
+        "按返回键退出": "Press Back to exit",
+        "这台电视上装的版本打不开，自动更新换不了它。用 Apps2Samsung 再装一次最新版就好。": "The version installed on this TV can't start here, and automatic updates can't replace it. Install the latest version once more with Apps2Samsung.",
         "正在找有视频的群和频道…": "Looking for groups and channels with videos…",
         "还没有哪个群里有视频。<br>在手机上把想看的片子转发到一个群（比如自己建的），回到电视上按确认刷新。":
             "None of your groups has videos yet.<br>On your phone, forward a video to a group (one of your own, for example), then press OK here to refresh.",

@@ -50,8 +50,27 @@
 
     /* ---------- 启动 ---------- */
 
+    /* 启动走不下去：借扫码登录的面板写原因。右边二维码那块没有码就是一块白（「连不上 Telegram」以前也是这样），藏起来 */
+    function bootFail(title, body) {
+        $("home").classList.add("hide");
+        $("panel").classList.add("on");
+        $("qr").style.display = "none";
+        $("how").innerHTML = "<div style='font-size:48px'>" + title + "</div><div style='font-size:30px;color:#999;margin-top:20px'>" + body + "</div>";
+        S.screen = "bootfail";
+    }
+
     async function boot() {
         var t0 = performance.now();
+        /* 装在安装包里的 mtcute（js/tg.bundle.js）在这台电视上跑不起来。它不随自动更新下发：1.1.2 及以前的打包目标太新，Tizen 6.0
+         * 解析不了，那几台照样自动更新到新的代码，mtcute 还是旧的，屏幕上却是「连不上 Telegram，检查网络后按确认重试」，看着像网络问题。
+         * 重试、换网络都没用，只有重装一次才好，就照直说。 */
+        if (typeof TGLib === "undefined") {
+            var b = Boot.info();
+            R("mtcute 没加载起来（TGLib 不存在；装的 " + b.packaged + "，跑的 " + (b.running || b.packaged) + "），请观众重装");
+            Diag.incident("mtcute 没加载起来，要重装");
+            bootFail(T("要重新安装一次"), T("这台电视上装的版本打不开，自动更新换不了它。用 Apps2Samsung 再装一次最新版就好。") + "<br>" + T("按返回键退出"));
+            return;
+        }
         var dropped = await Accounts.cleanup();
         if (dropped.length) { R("退出的账号留下的库：" + dropped.join("，")); }
         /* 包里没带 API ID / Hash（deploy.sh --noapi），又没填过：先填（apikey.js）。发布包和从源码装的都带着，平时不会走到这里 */
@@ -66,11 +85,7 @@
         } catch (e) {
             R("连不上 Telegram：" + errStr(e));
             Diag.incident("连不上 Telegram：" + errStr(e));
-            $("home").classList.add("hide");
-            $("panel").classList.add("on");
-            $("how").innerHTML = "<div style='font-size:48px'>" + T("连不上 Telegram") + "</div><div style='font-size:30px;color:#999;margin-top:20px'>" +
-                esc(errStr(e)) + "<br>" + T("检查网络后按确认重试") + "</div>";
-            S.screen = "bootfail";
+            bootFail(T("连不上 Telegram"), esc(errStr(e)) + "<br>" + T("检查网络后按确认重试"));
             return;
         }
         R("连上 Telegram " + Math.round(performance.now() - t0) + "ms，mtcute 在 " + TG.mode() + "；界面 " + I18n.lang + "（" + I18n.why + "，系统语言 " + I18n.sys + "）" +
