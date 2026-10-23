@@ -146,7 +146,7 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
 顺序：本地缓存（IndexedDB `tg-moov` 库的 `cover` 表）→ 电影（≥40 分钟）找维基百科海报 → Telegram 缩略图 → 太暗（平均亮度 < 24）或没有就从片子中间解一帧 → 都不行显示片名卡片（按片名算底色）。
 - **很多大文件的缩略图是开头那一帧，纯黑**（两部片亮度都是 0，手机上也是黑块）。第一版以为是缩略图没加载，其实是盖在上面的片名占位层挡住了 img（DOM 顺序）—— 用户拍照才发现。
 - **取帧用 WebCodecs**：`<video>` 的帧画不到画布上（硬件视频层，抖音项目实测），WebCodecs 单独解一个关键帧可以。H.264 1080p：读 1.7 秒、解 0.5 秒。**4K HEVC Main10 解不了**：默认 / prefer-hardware 报 `Decoding error`、prefer-software 报 `Error during flush`，换三个位置都一样。解码器偶尔不出帧也不报错，所以每次解码 8 秒超时、每部片 40 秒超时。开始播放前 `Cover.cancel()`，别和播放抢唯一的硬件解码器。
-- **海报用维基百科**：豆瓣对海外请求（带 bid cookie 也一样）回空数组；iTunes 搜索中英文、各地区都没结果；TMDB 要 key。维基 `generator=search` + `prop=pageimages&pilicense=any` 带海报（非自由图，~260×380）。搜「中文片名 年份 电影」，取前 3 条里「标题含片名且有图」的，没有就第一条有图的（「黑鹰坠落」对上台湾译名「黑鷹計劃」）。在 Mac 上试 6 部对 5 部（《流浪地球》搜到了《流浪地球3》、没图）。没找到的一周内不再找（`tg.noPoster.v1`）。
+- **海报用维基百科**：豆瓣对这边的请求（带 bid cookie 也一样）回空数组；iTunes 搜索中英文、各地区都没结果；TMDB 要 key。维基 `generator=search` + `prop=pageimages&pilicense=any` 带海报（非自由图，~260×380）。搜「中文片名 年份 电影」，取前 3 条里「标题含片名且有图」的，没有就第一条有图的（「黑鹰坠落」对上台湾译名「黑鷹計劃」）。在 Mac 上试 6 部对 5 部（《流浪地球》搜到了《流浪地球3》、没图）。没找到的一周内不再找（`tg.noPoster.v1`）。
 
 ## 音视频在文件里隔得远的片子：分两路读
 
