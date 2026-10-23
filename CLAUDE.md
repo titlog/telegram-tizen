@@ -316,6 +316,7 @@ Telegram 官方 Android 客户端的源码里就写着它自己的（`APP_ID = 4
   `PACKAGED`，`sites.local.js` 也是）。整份存进 localStorage 要 7–8MB（UTF-16），电视上的配额没量过；我们自己的代码只有 ~420KB。boot.js 跑
   更新包时，包里没有的脚本照样写 `js/<名字>` 从安装包读。**所以改了 mtcute（`build/`）或 hls.js，就是换了壳：boot.js 的 `SHELL` 加一**，
   SHELL 更老的电视跳过那一版、要重装。`update/shell.json` 记着每个 SHELL 发布时这两样的指纹，`update-release` 和 `update-verify` 都卡着。
+  例外是只换打包目标、补旧引擎缺的 API（1.1.3）：收到更新包的老壳电视什么都没变，就不加一，把 `shell.json` 里当前 SHELL 的指纹改成新的。
 - 钥匙是自己的：私钥 `~/.telegram-tizen-update-key.pem`、口令 `~/.telegram-tizen-update-password`（都 600、都在仓库外），公钥指纹
   `5ee2:90e1:9906:fe44:adf7:60f7:8988:4173`。不和 bilibili、抖音共用。丢了要所有人重装；泄露了谁都能往装着它的电视推代码，而这个应用开着
   登录好的 Telegram 会话。
@@ -345,7 +346,7 @@ booting）；装回 1.1.0 → `下载过的 1.0.1 不比安装包 1.1.0 新，�
 ### 发一版
 
 1. 改 `app/config.xml` 的版本号和 `app/js/boot.js` 的 `PACKAGED_FALLBACK`（要一致，update-verify 卡着），提交。改了 mtcute / hls.js 的话 `SHELL` 加一
-   （`build/` 下的任何东西都算，包括 `bundle.sh` 的打包参数和 `compat.js`）。
+   （`build/` 下的任何东西都算，包括 `bundle.sh` 的打包参数和 `compat.js`；只换打包目标、补 API 的例外见上）。
 2. `node tools/update-release.mjs`（取自 `git archive HEAD`，`app/`、`build/` 有未提交改动就拒绝），
    `git add update && git commit -m "更新包 x.y.z" && git tag vx.y.z && git push origin master vx.y.z`
    —— tag 要一起推：manifest 从 master 取，bundle 从 tag 取。
@@ -370,5 +371,7 @@ booting）；装回 1.1.0 → `下载过的 1.0.1 不比安装包 1.1.0 新，�
   后台线程 1.5 秒连上 Telegram、回 `AUTH_KEY_UNREGISTERED`（还没登录，就是连上了）；同一份包去掉 throwIfAborted 那段补丁，`getMe` 20 秒没回。
   后台线程要从 localhost 起：桌面上从 `file://` 起的 blob worker 没有 `crypto.subtle`（电视上页面和线程都是安全上下文，没这个问题）。
   **Tizen 6.0 的电视上还没跑过** —— 那两台装上新版之后的诊断日志会说。
-- **换了壳**：`tg.bundle.js` 不随更新下发，`SHELL` 1 → 2。打包参数原来不在 `vendorPrint()` 里（只改 `--target` 拦不住），现在 `bundle.sh`、`compat.js`
-  都算进去。SHELL 1 的电视（装着 1.1.x 的）收不到 shell 2 的更新包，要重装一次 wgt；Tizen 6.0 上反正本来就打不开。
+- **壳没换号**：`tg.bundle.js` 不随更新下发，按规矩该 `SHELL` 1 → 2，没加，`update/shell.json` 里 shell 1 的指纹改成了新包的。加一的话，Tizen 9 上
+  正常用的电视以后全都收不到更新、要重装；不加，收到 1.1.3 更新包的电视和现在比什么都没变（`app/js` 不依赖新包里的任何东西），而 Tizen 6.x–8.0
+  要的语法和补丁在新包里，只能重装 wgt 拿到，加不加都一样。打包参数原来不在 `vendorPrint()` 里（只改 `--target` 拦不住），现在 `bundle.sh`、
+  `compat.js` 都算进去。

@@ -23,11 +23,12 @@ var Boot = (function () {
     "use strict";
 
     /* 这个文件实现的更新包约定：body、按顺序的样式、按顺序的脚本（见 tools/update-release.mjs），加上安装包里的 mtcute 和 hls.js。
-     * 哪一版的 boot.js 对更新包的期待变了、或者 mtcute / hls.js 换了，就把它加一；SHELL 更老的电视跳过那一版，要重装。 */
-    var SHELL = 2;
+     * 哪一版的 boot.js 对更新包的期待变了、或者 mtcute / hls.js 换了，就把它加一；SHELL 更老的电视跳过那一版，要重装。
+     * 只换了打包目标、补了旧引擎缺的 API（1.1.3）不加：见 CLAUDE.md「Tizen 6.0 上打不开」。 */
+    var SHELL = 1;
 
     /* 安装包的版本，给没有 tizen.application 的引擎（桌面浏览器）用。tools/update-verify.mjs 卡着它和 config.xml 一致。 */
-    var PACKAGED_FALLBACK = "1.1.2";
+    var PACKAGED_FALLBACK = "1.1.3";
 
     /* ECDSA P-256 公钥，SPKI，base64。tools/update-key.mjs 写进来；私钥永远不进仓库。 */
     var PUBKEY = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEE9Z+Uan4otX60X0tFBnW0SeeG9d3GWpAiSJ1Mbk5dygmDUiO+UGhz5hNArZx6/pRtqLERnErGWAWFnrDsCAlDw==";
