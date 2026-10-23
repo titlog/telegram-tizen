@@ -16,7 +16,7 @@ app/js/boot.js    这次跑哪份代码：安装包的，还是自动更新下�
                   config.js、boot.js 两个标签，**新加脚本加进 boot.js 的 SCRIPTS**
 app/js/update.js  查新版本、下载、验签名、存进 localStorage；本身随更新下发。见「自动更新和诊断日志」
 app/js/diag.js    诊断日志：每一行去掉身份记进一圈，出事或手动时传给开发者；接收地址在这里（config.js 不随更新下发）
-app/js/selftest.js  deploy.sh --diag 才跑的那一段（设置页里传一次、开关、造一次出事）
+app/js/selftest.js  deploy.sh --diag / --loginexpiry 才跑的那一段（诊断日志走一遍；扫码页上连接作废）
 app/js/apikey.js  用哪组 API ID / Hash：电视上填过的 → 包里明文的（deploy.sh）→ 包里打乱过的（release.sh）；Telegram 拒了就回填写页
 app/js/i18n.js    界面语言：中文原句当键查英文（T("…")），跟系统语言、来源栏最下面切换
 app/js/subs.js    字幕：外挂文件（SRT/ASS/VTT，GBK/Big5 自动认）、tx3g、MKV 的文字和 PGS 图形字幕、画到屏幕上
@@ -58,6 +58,7 @@ node test/i18n.mjs                               # 改了界面上的字之后
 node test/compat.mjs                             # 改 build/src/compat.js 之后（deploy 也跑）
 node test/apikey.mjs                             # 改 apikey.js、填写页、登录出错的处理之后（UILANG=en 英文）
 zsh tools/deploy.sh --diag                       # 诊断日志在电视上走一遍（7 步，1 分钟）；先开 PORT=8096 node ../bilibili-tizen/tools/diag-local.mjs
+zsh tools/deploy.sh --loginexpiry                # 扫码页上后台线程的连接作废，看是不是重连、换码（3 步，2 分钟；会添加一个账号再取消）
 node ../bilibili-tizen/tools/diag-logs.mjs --app telegram-tizen   # 读别人电视传上来的（--device 编号 / <id>）
 zsh tools/release.sh                             # 发布包 → dist/telegram-tizen-<版本>.wgt
 node test/serve.mjs & node test/run.mjs media/a_h264_fast.mp4 "media/b_h264_moovend.mp4?start=30"   # 改 player.js 之后
@@ -278,6 +279,14 @@ PGS 一个显示集几 KB 到几十 KB、蓝光 remux 常带四五条：定下�
 - 界面：来源栏倒数第二项「账号：名字」→ 账号页（各账号、+ 添加账号、退出 当前的）。切换之后的提示（「已切换到 …」）跨过重新加载，用 `Store.once`。
 - 桌面测试（`ONLY=acct`）：假 Telegram 层按当前账号的库答「我是谁」（tg-session-3 故意答成第一个人），走一遍添加 → 切回 → 添加已经在的 → 扫码时按返回 →
   退出：进度按人分开（1 / 0 / 1），退出的人的进度键删了、库下次启动删了。踩了一下：按下确认就重新加载页面，测试里松开那一下没有页面可发，按键工具要容忍。
+- **扫码页上挂到后台（2026-10-23，一台美国的 Tizen 9，1.1.2）**：连上 Telegram 之后 100 秒「启动出错 signal is aborted without reason」，
+  栈是 port 的 `_close` ← `_onMessage`。主线程停住（挂到后台、待机）就没有心跳，**后台线程把请求也当心跳**，60 秒都没有就作废这条连接；
+  回来时 port 收到 `connection_expired`、`_close`，等着的 `signInQr` 跟着断：正等一个请求时是「Worker connection expired」，两次换码之间是
+  `stopSignal` 的「signal is aborted without reason」。`again()` 只管普通请求，扫码这条没管，`boot()` 停在这里、二维码不再换。
+  `--loginexpiry` 复现（把 port 发往后台线程的全扣下 —— 只停心跳不够，扫码页每 30 秒换码的请求照样续命，第一版停了 90 秒都没作废）：
+  旧代码 67 秒作废、`启动出错 Worker connection expired`、码停在第 1 张；`TG.login` 两种都认、重连再出码（最多三次）之后 3 步全过、换出第 2 张。
+  顺带：扫码页按返回、换账号都是 reload，卸载时 mtcute 销毁 port，也是 `stopSignal` 中止 —— 以前每次都记「启动出错」、报一次出事；
+  现在 `TG.leaving()` 时不重连、不记。
 - 电视上（10-18 14:37）：升级上去原来的会话就是 a1，getMe 对上，不用重新扫码，启动到主页 2.4 秒。添加第二个账号、切换、退出：用户 14:38 说试过没问题，
   但日志里没有「添加账号」「切换账号」「账号：2 个」这些行 —— **当作还没在电视上验证**。
 

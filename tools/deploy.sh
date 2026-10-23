@@ -6,6 +6,8 @@
 #   zsh tools/deploy.sh --noapi    不写凭证：第一次打开要在电视上填 API ID / Hash（apikey.js）；测完装回正常构建
 #   zsh tools/deploy.sh --diag     诊断日志：设置页里手动传、关掉再开、造一次出事自动传（js/selftest.js，1 分钟）；
 #                                  传到 TG_DIAG_TO，默认这台电脑上的 PORT=8096 node ../bilibili-tizen/tools/diag-local.mjs（先开着）
+#   zsh tools/deploy.sh --loginexpiry  扫码页上后台线程的连接作废（挂到后台一分钟以上）：添加一个账号去扫码页、停心跳等作废，
+#                                      看是不是重连、换码；最后按返回取消添加（js/selftest.js，2 分钟）
 #   TG_UPDATE_MANIFEST=http://<这台电脑>:<端口>/manifest.json zsh tools/deploy.sh   在电视上测自动更新（只有开发构建认它）
 set -e
 NOAPI=""
@@ -14,6 +16,7 @@ for a in "$@"; do
   case "$a" in
     --noapi) NOAPI=1 ;;
     --diag) SELFTEST="diag" ;;
+    --loginexpiry) SELFTEST="loginexpiry" ;;
   esac
 done
 

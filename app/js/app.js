@@ -1665,6 +1665,8 @@
     window.__app = { screen: function () { return S.screen; }, openOpts: openOpts };
 
     boot().catch(function (e) {
+        /* 扫码页按返回、换账号都是 reload：卸载时 mtcute 销毁 port，等着的 signInQr 跟着断。那不是出事，以前每次都记成「启动出错」、报一次出事 */
+        if (TG.leaving()) { return; }
         R("启动出错 " + errStr(e) + " | " + String(e && e.stack || "").split("\n").slice(0, 3).join(" "));
         Diag.incident("启动出错：" + errStr(e));
     });

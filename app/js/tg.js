@@ -66,9 +66,24 @@ var TG = (function () {
         try { return await again(function () { return client.getMe(); }); } catch (e) { return null; }
     }
 
-    /* onUrl(url, expires) 每换一张码调一次；askPassword() → Promise<string>（两步验证） */
-    function login(onUrl, onScanned, askPassword, onBadPassword) {
-        return client.signInQr({ onUrlUpdated: onUrl, onQrScanned: onScanned, password: askPassword, invalidPasswordCallback: onBadPassword });
+    /* 页面在卸载（扫码页按返回、换账号都是 reload）：mtcute 自己在这时销毁 port，同样是 stopSignal 中止，那不是作废，不重连 */
+    var leaving = false;
+    window.addEventListener("beforeunload", function () { leaving = true; });
+
+    /* onUrl(url, expires) 每换一张码调一次；askPassword() → Promise<string>（两步验证）。
+     * 扫码页上挂到后台一分钟以上（电视待机也是）：后台线程把这条连接作废，等着的 signInQr 跟着断 —— 正等一个请求时报
+     * 「Worker connection expired」，在两次换码之间时报「signal is aborted without reason」（port 的 stopSignal 被中止）。
+     * 1.1.2 上 boot() 就停在这里、二维码不再换（2026-10-23 一台美国的电视；--loginexpiry 复现）。重连、重新出码，最多三次 */
+    async function login(onUrl, onScanned, askPassword, onBadPassword) {
+        for (var tries = 0; ; tries++) {
+            try {
+                return await client.signInQr({ onUrlUpdated: onUrl, onQrScanned: onScanned, password: askPassword, invalidPasswordCallback: onBadPassword });
+            } catch (e) {
+                if (leaving || !remake || tries >= 3 || !(gone(e) || (client.stopSignal && client.stopSignal.aborted))) { throw e; }
+                Log.report("tg", "扫码时后台线程的连接作废了（" + (e && e.message) + "），重连、重新出码");
+                await reconnect();
+            }
+        }
     }
 
     async function logout() { try { await client.logOut(); } catch (e) {} }
@@ -403,6 +418,9 @@ var TG = (function () {
         search: search, subtitlesFor: subtitlesFor, download: download,
         describe: describe,
         mode: function () { return mode; },
-        primaryDc: function () { return client.getPrimaryDcId(); }
+        primaryDc: function () { return client.getPrimaryDcId(); },
+        leaving: function () { return leaving; },
+        /* 给自测（js/selftest.js --loginexpiry）扣消息用 */
+        client: function () { return client; }
     };
 })();
