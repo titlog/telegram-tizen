@@ -722,6 +722,8 @@ var Player = (function () {
                 }
                 if (performance.now() - sess.t0 > 90000) {
                     clearInterval(tick);
+                    /* 放弃了就别再取：2026-10-23 放弃之后下载还在每 10 秒重试一次，直到观众离开这个视频。 */
+                    sess.lanes.forEach(stopLane);
                     R("90 秒没出画面，放弃");
                     state("error", tx("90 秒没出画面"));
                     reject(new Error("timeout"));

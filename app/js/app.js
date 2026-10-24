@@ -64,9 +64,15 @@
         /* 装在安装包里的 mtcute（js/tg.bundle.js）在这台电视上跑不起来。它不随自动更新下发：1.1.2 及以前的打包目标太新，Tizen 6.0
          * 解析不了，那几台照样自动更新到新的代码，mtcute 还是旧的，屏幕上却是「连不上 Telegram，检查网络后按确认重试」，看着像网络问题。
          * 重试、换网络都没用，只有重装一次才好，就照直说。 */
-        if (typeof TGLib === "undefined") {
+        /* 包解析得了、却是 1.1.3 以前打的：Chromium 116 以前的引擎上没有 AbortSignal.any（Chromium 100 以前还没有 throwIfAborted），
+         * 新包的 compat.js 在主线程和后台线程都补上了，旧包没有。2026-10-23 一台 Tizen 8.0 装的 1.1.2、跑的 1.1.5：连得上、登得进、
+         * 列得出视频，每一次下载都是「AbortSignal.any is not a function」，90 秒没画面，屏幕上只说放不了。主线程这里缺，就是包是旧的。 */
+        var oldPack = typeof TGLib === "undefined" ? "TGLib 不存在" :
+            typeof AbortSignal !== "undefined" && typeof AbortSignal.any !== "function" ? "这台电视没有 AbortSignal.any，包里也没补" :
+            typeof AbortSignal !== "undefined" && typeof AbortSignal.prototype.throwIfAborted !== "function" ? "这台电视没有 AbortSignal.throwIfAborted，包里也没补" : "";
+        if (oldPack) {
             var b = Boot.info();
-            R("mtcute 没加载起来（TGLib 不存在；装的 " + b.packaged + "，跑的 " + (b.running || b.packaged) + "），请观众重装");
+            R("安装包里的 mtcute 用不了（" + oldPack + "；装的 " + b.packaged + "，跑的 " + (b.running || b.packaged) + "），请观众重装");
             Diag.incident("mtcute 没加载起来，要重装");
             bootFail(T("要重新安装一次"), T("这台电视上装的版本打不开，自动更新换不了它。用 Apps2Samsung 再装一次最新版就好。") + "<br>" + T("按返回键退出"));
             return;
