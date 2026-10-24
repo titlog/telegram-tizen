@@ -79,7 +79,7 @@ var Diag = (function () {
         /* Telegram 用户 ID、网站账号编号（「id=8773…」「账号编号 7」） */
         [/\b(id ?[=:：] ?)-?\d{4,}/g, "$1…"],
         [/(账号编号 ?)[^\s，,；;）)]+/g, "$1…"],
-        /* 观众的 IP（10-24：bilibili 那边 #7 传上来的日志里有七处）：CDN 的 403 页（Client_ip）、报错里引的响应头
+        /* IP 地址：CDN 的 403 页（Client_ip）、报错里引的响应头
          * （x-debug-rmt-addr）、地址里的 oi=（整数形式）。别的点分四段也去掉，只留斜杠后面的版本号（Chrome/120.0.0.0）；地址上面那条已经整个抹了。 */
         [/((?:client[_-]?ip|x-debug-rmt-addr|x-forwarded-for|x-real-ip|remote[_-]?addr)["']?\s*[:=]\s*["']?)[^\s"'<>,;&]+/gi, "$1…"],
         [/(\boi ?[=:：] ?)\d+/g, "$1…"],
