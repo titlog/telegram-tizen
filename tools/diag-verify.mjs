@@ -123,6 +123,20 @@ await t("没包的也兜住：「」里的名字、地址、tg:// 链接、用�
   }
 });
 
+await t("观众的 IP 不出门：403 页、响应头、oi、别的点分四段；版本号留着", () => {
+  const { Diag } = television();
+  /* 编的地址（文档用的那几段）。 */
+  const lines = [
+    "app: 放不了 <p>Client_ip: 203.0.113.7</p> <p>Client_ip: 2001:db8::7</p> {\"x-debug-rmt-addr\":\"198.51.100.23\"}",
+    "app: 连到 192.0.2.44:443，oi=3405803777",
+  ];
+  for (const l of lines) {
+    const s = Diag.scrub(l);
+    assert.doesNotMatch(s, /203\.0\.113\.7|2001:db8::7|198\.51\.100\.23|3405803777|192\.0\.2\.44/, s);
+  }
+  assert.match(Diag.scrub("engine: Mozilla/5.0 Chrome/120.0.0.0 Safari/537.36"), /Chrome\/120\.0\.0\.0/);
+});
+
 await t("上传的整份内容里没有任何包起来的东西（原因也过一遍）", () => {
   const tv = television();
   tv.Diag.record("app", "播放「" + tv.Diag.priv("秘密片名") + "」1.2 GB");
