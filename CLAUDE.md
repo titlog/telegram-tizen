@@ -319,6 +319,8 @@ Telegram 官方 Android 客户端的源码里就写着它自己的（`APP_ID = 4
 和那两个应用是同一份代码（来龙去脉在 bilibili 的 `docs/自动更新.md`、`docs/调试与日志.md`）：签名过的 `update/manifest.json` 从 master 取，
 更新包按 tag 取，下载时验 ECDSA 签名和 sha256，存进 localStorage，**下次打开生效**；走不到首页的更新包下次启动标坏、退回安装包。
 诊断日志出事（或手动）时把最近 600 行传到 bilibili 那边的接收端（`server/diag-worker.mjs`，三个应用共用，按 `app` 分开）。
+**没传上的，下次启动一分钟后补传一次**（10-25，1.1.7，照 bilibili 1.4.6：接收端 404 了八小时，那段时间的全丢了）：最近一行上传记录是
+「没传上」就把那一圈再传一次，原因写「补传：…」；旧版本写的那行也认；400 / 413 不补；计入一天 12 份、不占三分钟间隔。电视上的实测在 bilibili 那边。
 
 **自动更新这里不一样的地方：**
 - **mtcute（`js/tg.bundle.js`，2.8MB）、hls.js（`js/vendor/hls.min.js`，600KB）不随更新下发**，一直用安装包里的（`tools/update-lib.mjs` 的
