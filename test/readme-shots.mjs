@@ -23,6 +23,12 @@
  * 不能 -c copy：从中间截出来的视频带 3.3 秒的预滚（编辑列表盖住）、音频从 -1 秒起，播放引擎不出画面（见 CLAUDE.md）：
  *   ffmpeg -ss 1688 -i https://archive.org/download/Sita_Sings_the_Blues/Sita_Sings_the_Blues_1080p.mp4 -t 45 -map 0:v:0 -map 0:a:0 \
  *          -c:v libx264 -preset veryfast -crf 20 -c:a aac -b:a 160k -movflags +faststart test/media/readme/sita_1080p_part.mp4
+ * 音乐那张：Kimiko Ishizaka 弹的 The Open Goldberg Variations（2012，CC0），archive.org 上的前两首原样下下来（放第一首、预先下第二首）；
+ * 专辑图是 Haussmann 1748 年画的巴赫像（公有领域，Wikimedia Commons），裁成方的：
+ *   B='https://archive.org/download/OpenGoldbergVariations/Kimiko%20Ishizaka%20-%20J.S.%20Bach-%20-Open-%20Goldberg%20Variations%2C%20BWV%20988%20%28Piano%29%20-%20'
+ *   curl -Lo test/media/readme/ogv_01.mp3 "${B}01%20Aria.mp3"; curl -Lo test/media/readme/ogv_02.mp3 "${B}02%20Variatio%201%20a%201%20Clav..mp3"
+ *   ffmpeg -i https://upload.wikimedia.org/wikipedia/commons/6/6a/Johann_Sebastian_Bach.jpg \
+ *          -vf crop=1180:1180:98:30,scale=640:640,format=yuvj420p -q:v 3 test/media/thumbs/bach_1748.jpg
  * 然后：RATE=0 LAT=0 node test/serve.mjs & node test/readme-shots.mjs   → docs/screenshots/*.jpg（1600×900，macOS 的 sips 转） */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -37,7 +43,7 @@ const OUT = ROOT + 'docs/screenshots/';
 const EN = process.env.UILANG === 'en', PRE = EN ? 'en-' : '';
 fs.mkdirSync(OUT, { recursive: true });
 const SINTEL = 'readme/sintel_part.mkv', SITA = 'readme/sita_1080p_part.mp4', CHS = 'readme/Sintel.2010.1080p.chs.srt';
-for (const f of [SINTEL, SITA, CHS]) {
+for (const f of [SINTEL, SITA, CHS, 'readme/ogv_01.mp3', 'readme/ogv_02.mp3']) {
   if (!fs.existsSync(ROOT + 'test/media/' + f)) { console.log('缺 test/media/' + f + '，见文件开头'); process.exit(1); }
 }
 
@@ -59,16 +65,25 @@ const pages = [
   ['Sita Sings the Blues 希塔唱蓝调', 'Sita_Sings_the_Blues', 'ia_sita_1150', 2],  // Nina Paley 2008，CC0；Sita_Sings_the_Blues_720p.mp4 第 1150 秒
   ['The General 将军号（1926）', 'TheGeneral1926', 'ia_general_3300', 4],            // Buster Keaton 1926，公有领域；The_General_1926_720p.mp4 第 3300 秒
   ['His Girl Friday 女友礼拜五（1940）', 'his_girl_friday', 'ia_hgf_400', 7]];      // Howard Hawks 1940，公有领域（版权没续期）；his_girl_friday.mp4 第 400 秒
-for (const t of [...films, ...pages].map(x => x[2])) {
+/* 「钢琴」频道里的歌：The Open Goldberg Variations 的前六首（歌名、时长、大小照 archive.org 上的 MP3），前两首真能放 */
+const tracks = [['Aria', 299.5, 5849600], ['Variatio 1 a 1 Clav.', 115.5, 2637824], ['Variatio 2 a 1 Clav.', 123, 2537472],
+  ['Variatio 3 a 1 Clav. Canone all Unisuono', 116, 2524160], ['Variatio 4 a 1 Clav.', 68, 1562624], ['Variatio 5 a 1 ovvero 2 Clav.', 94, 2113024]];
+for (const t of [...films, ...pages].map(x => x[2]).concat('bach_1748')) {
   if (!fs.existsSync(ROOT + 'test/media/thumbs/' + t + '.jpg')) { console.log('缺封面 test/media/thumbs/' + t + '.jpg，见文件开头'); process.exit(1); }
 }
 const enTitle = (t) => t.replace(/\s*[一-鿿].*?(（(\d{4})）)?$/, (m, p, y) => y ? ' (' + y + ')' : '');
 const info = { year: '', rating: '', director: '' };
+const GROUP = EN ? 'Forwarded by me' : '我转发的', PIANO = EN ? 'Piano' : '钢琴曲';
+/* msg（会话 + 消息编号）和 chatTitle 是给播放记录的：记下的是这两样，打开时按它们找回来（byRefs），卡片上写来自哪个群 */
 const items = films.map(([title, duration, thumb, ago], i) => ({
   key: 'k' + i, fileKey: 'f' + i, thumb, title: EN ? enTitle(title) : title, duration, date: Date.now() - ago * day, info,
-  ...(i === 0 ? { file: SINTEL, fileName: 'Sintel.2010.1080p.mkv', asFile: true, size: 1180090590, bytes: fs.statSync(ROOT + 'test/media/' + SINTEL).size,
-                  msg: { id: 1, chat: { id: 1 } } }
+  msg: { id: 100 + i, chat: { id: 'a' } }, chatTitle: GROUP,
+  ...(i === 0 ? { file: SINTEL, fileName: 'Sintel.2010.1080p.mkv', asFile: true, size: 1180090590, bytes: fs.statSync(ROOT + 'test/media/' + SINTEL).size }
               : { file: 'missing-' + i, size: Math.round(duration * 1.6 * 1048576 / 10) }) }));
+const music = tracks.map(([title, duration, size], i) => ({
+  kind: 'music', key: 'm' + i, fileKey: 'm' + i, thumb: 'bach_1748', title, performer: 'Kimiko Ishizaka', ext: 'mp3', mime: 'audio/mpeg',
+  size, duration, fileName: `Kimiko Ishizaka - Goldberg Variations - ${String(i + 1).padStart(2, '0')} ${title}.mp3`, date: Date.now() - (2 * day + i * 60000), info,
+  msg: { id: 200 + i, chat: { id: 'm' } }, chatTitle: PIANO, file: i < 2 ? `readme/ogv_0${i + 1}.mp3` : 'missing-m' + i }));
 const links = pages.map(([title, id, thumb, ago], i) => {
   const url = 'https://archive.org/details/' + id;
   return { kind: 'web', key: 'w' + i, fileKey: 'web:' + url, url, site: 'archive.org', doc: {}, thumb, title: EN ? enTitle(title) : title,
@@ -78,8 +93,8 @@ const subFiles = { 'Sintel.2010.1080p.mkv': [{ name: 'Sintel.2010.1080p.chs.srt'
 
 const stub = `
 var TG = (function () {
-  var ITEMS = ${JSON.stringify(items)}, LINKS = ${JSON.stringify(links)}, SUBS = ${JSON.stringify(subFiles)};
-  ITEMS.concat(LINKS).forEach(function (it) { it.date = new Date(it.date); });
+  var ITEMS = ${JSON.stringify(items)}, LINKS = ${JSON.stringify(links)}, MUSIC = ${JSON.stringify(music)}, SUBS = ${JSON.stringify(subFiles)};
+  ITEMS.concat(LINKS, MUSIC).forEach(function (it) { it.date = new Date(it.date); });
   function httpSource(url, size) {
     var CH = Player.CH;
     return { size: size, stream: function (offset, signal, throttle) {
@@ -99,10 +114,22 @@ var TG = (function () {
     init: async function () {}, mode: function () { return "stub"; }, me: async function () { return { id: 1 }; },
     login: async function () {}, logout: async function () {},
     videoCount: async function (src) { return src === "c" ? 0 : 9; },
-    sources: async function () { var en = ${EN}; return [{ id: "a", title: en ? "Forwarded by me" : "我转发的", kind: "group" }, { id: "b", title: en ? "Open movies" : "开源动画", kind: "channel" },
-      { id: "d", title: en ? "Classic films" : "老电影", kind: "channel" }, { id: "e", title: en ? "Documentaries" : "纪录片", kind: "channel" }, { id: "c", title: en ? "Empty group" : "空的群", kind: "group" }]; },
-    videos: async function () { return { items: ITEMS, next: undefined, total: ITEMS.length }; },
-    links: async function () { return LINKS; },
+    sources: async function () { var en = ${EN}; return [{ id: "a", title: ${JSON.stringify(GROUP)}, kind: "group" }, { id: "b", title: en ? "Open movies" : "开源动画", kind: "channel" },
+      { id: "d", title: en ? "Classic films" : "老电影", kind: "channel" }, { id: "m", title: ${JSON.stringify(PIANO)}, kind: "channel" },
+      { id: "e", title: en ? "Documentaries" : "纪录片", kind: "channel" }, { id: "c", title: en ? "Empty group" : "空的群", kind: "group" }]; },
+    /* 给副本：放过之后应用会把截的那一分钟的长度写回卡片（当文件发的视频本来没有时长），播放记录里就成了 1:07 */
+    videos: async function (src) { var list = (src === "m" ? MUSIC : ITEMS).map(function (x) { return Object.assign({}, x); }); return { items: list, next: undefined, total: list.length }; },
+    links: async function (src) { return src === "m" ? [] : LINKS; },
+    /* 播放记录：按「会话 + 消息编号」找回（真的 tg.js 是 getMessages），网页链接按地址 */
+    byRefs: async function (refs) {
+      var all = ITEMS.concat(MUSIC), items = [];
+      refs.forEach(function (h) {
+        var it = h.kind === "web" ? LINKS.filter(function (x) { return x.url === h.url; })[0]
+                                  : all.filter(function (x) { return x.msg.chat.id === h.chat && x.msg.id === h.msg; })[0];
+        if (it) { items.push(Object.assign({}, it, { playedAt: h.at })); }
+      });
+      return { items: items, missing: refs.length - items.length };
+    },
     thumb: async function (it) {
       var b = await (await fetch("/test/media/thumbs/" + it.thumb + ".jpg")).arrayBuffer();
       return { url: URL.createObjectURL(new Blob([b], { type: "image/jpeg" })), bytes: b };
@@ -166,6 +193,13 @@ await page.evaluate((l) => { try { localStorage.clear(); localStorage.setItem('t
 await page.reload();
 await sleep(1200);
 await page.evaluate((t) => Store.setProgress('f2', 410, 734, t), items[2].title);
+/* 播放记录里早几天放过的（之后真放的 Sintel、Sita、Aria 排在它们前面）：钢之泪（看到一半）、将军号、大雄兔 */
+await page.evaluate(([tos, gen, bbb, gurl]) => {
+  Store.setProgress('web:' + gurl, 1830, 4500, gen);
+  Store.addHistory({ k: 'f1', kind: 'video', chat: 'a', msg: 101, title: bbb, at: Date.now() - 6 * 86400000 });
+  Store.addHistory({ k: 'web:' + gurl, kind: 'web', url: gurl, site: 'archive.org', image: '', title: gen, at: Date.now() - 4 * 86400000 });
+  Store.addHistory({ k: 'f2', kind: 'video', chat: 'a', msg: 102, title: tos, at: Date.now() - 3 * 86400000 });
+}, [items[2].title, links[1].title, items[1].title, links[1].url]);
 await page.reload();
 await sleep(3000);
 await shot('01-home');
@@ -203,4 +237,28 @@ console.log('  网页链接：' + await page.evaluate(() => { const v = document
 /* 暂停一下，片名和进度条露出来（不然截出来就是一张电影画面，看不出是这个应用在放） */
 await key(13); await sleep(800);
 await shot('05-web');
+await key(10009); await sleep(1200);
+
+/* 音乐：来源栏里的「钢琴曲」频道 → 第一首 Aria。放到几秒、专辑图和底图都出来了再截 */
+const txt = (sel) => page.evaluate((s) => { const e = document.querySelector(s); return e ? e.textContent : null; }, sel);
+const railTo = async (re) => {
+  await key(37, 3); await sleep(500);
+  for (let i = 0; i < 12 && !re.test(await txt('#rail-list .src.focus') || ''); i++) await key(40);
+  for (let i = 0; i < 12 && !re.test(await txt('#rail-list .src.focus') || ''); i++) await key(38);
+  if (!re.test(await txt('#rail-list .src.focus') || '')) console.log('  ✗ 来源栏里没找到 ' + re);
+  await key(13); await sleep(2000);
+};
+await railTo(/Piano|钢琴曲/);
+await key(13);
+const at = () => page.evaluate(() => document.getElementById('au').currentTime);
+if (!await waitFor(async () => (await at()) > 6, 20000)) console.log('  ✗ Aria 20 秒没放到第 6 秒');
+console.log('  音乐：' + await txt('#mu-title') + ' / ' + await txt('#mu-artist') + ' / ' + await txt('#mu-from') + ' / ' + await txt('#mu-next'));
+await shot('06-music');
+await key(10009); await sleep(1000);
+
+/* 播放记录：最近放的在前（Aria 还在放），带着来自哪个群、看到哪里 */
+await railTo(/^(History|播放记录)$/);
+await sleep(1500);
+console.log('  播放记录：' + await page.evaluate(() => [...document.querySelectorAll('.card')].map(c => c.querySelector('.title').textContent + '〔' + c.querySelector('.meta').textContent + '〕').join(' / ')));
+await shot('07-history');
 await browser.close();

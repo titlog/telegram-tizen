@@ -5,10 +5,15 @@
 ## 结论
 
 - README.md 是英文（GitHub 默认展示），README.zh.md 是中文；截图中英各一套（`docs/screenshots/en-*.jpg` / 不带 en- 的）。
-- 片子都要能合法转发：Blender 的开源电影（CC BY）、archive.org 上公有领域 / CC0 的老电影。假的 Telegram 层，不碰真账号；archive.org 的接口和下载在脚本里拦下来答。
+- 片子都要能合法转发：Blender 的开源电影（CC BY）、archive.org 上公有领域 / CC0 的老电影；音乐是 The Open Goldberg Variations（CC0），
+  专辑图用 Haussmann 画的巴赫像（公有领域）—— 那个 archive.org 条目里的专辑封面是别人传的，协议说不清，没用。
+  假的 Telegram 层，不碰真账号；archive.org 的接口和下载在脚本里拦下来答。
 - 截片段：视频和音频要从同一处开始（音频晚开头播放引擎走不动）；MP4 别 `-c copy` 从中间截（编辑列表），重新编码。
 
-**README 截图**（`test/readme-shots.mjs`，中英各 5 张）：网格里 Blender 的片子和 archive.org 的卡片混排；Sintel 用官方发布的
+- 播放记录那张：早几天放过的三条（钢之泪、将军号、大雄兔）开头写进去，之后真放的 Sintel、Sita、Aria 排在前面。
+  假的 `TG.videos` 要给副本：应用放过当文件发的视频会把时长写回卡片对象，截的是一分钟的片段，播放记录里 Sintel 就成了 1:07。
+
+**README 截图**（`test/readme-shots.mjs`，中英各 7 张，1.2.2 起多了音乐、播放记录两张；以前是 5 张）：网格里 Blender 的片子和 archive.org 的卡片混排；Sintel 用官方发布的
 `Sintel.2010.1080p.mkv`（H.264 + AC-3 5.1 + 10 条内嵌 SRT）截一分钟，加官方的中文外挂字幕 `sintel_chs.srt`（GBK）；字幕菜单；
 网页链接那张拦下 archive.org 的接口和下载，转到本地截的 Sita 1080p。
 - **截片段的坑**：`ffmpeg -ss 104 -i … -c:v copy -c:a aac` —— 视频从 104 秒前面那个关键帧（98.958）开始，音频从 104 秒开始，

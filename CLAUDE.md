@@ -129,7 +129,7 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
 2. `node tools/update-release.mjs`（取自 `git archive HEAD`，`app/`、`build/` 有未提交改动就拒绝），
    `git add update && git commit -m "更新包 x.y.z" && git tag vx.y.z && git push origin master vx.y.z`
    —— tag 要一起推：manifest 从 master 取，bundle 从 tag 取。
-3. `zsh tools/release.sh` 出 wgt，`gh release create`，说明中英双份。
+3. `zsh tools/release.sh` 出 wgt，`gh release create`，说明先英文、`---`、再中文，最后 sha256（用户 10-26 要的，老的发布说明也都改成了这样）。
 4. 装着 1.1.0 以后版本的电视会自己更新。
 5. 不用管 Apps2Samsung 的社区目录（README 里推荐的装法）：它每天按 `releases/latest` 自己取新的 wgt
    （`Apps2Samsung/tizen-community-packages` 的 `packages/titlog__telegram-tizen.json`，按 `telegram-tizen-.*[.]wgt$` 挑资产），

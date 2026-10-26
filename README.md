@@ -30,6 +30,8 @@ the original picture quality, and your phone is free as soon as the message is s
 | Press Left to slide out the source list: the groups and channels that have videos | A 1.1 GB MKV sent as a file, streaming, with its English subtitle track on |
 | ![Subtitle menu](docs/screenshots/en-04-menu.jpg) | ![A web link](docs/screenshots/en-05-web.jpg) |
 | Hold OK: the ten subtitle tracks inside the file, plus a subtitle file posted in the group | An archive.org film page posted in the group: the TV looks up the 1080p original and plays it |
+| ![Music](docs/screenshots/en-06-music.jpg) | ![History](docs/screenshots/en-07-history.jpg) |
+| Songs posted in a channel: pick one and the rest play in order; Back returns to the list while it keeps playing | History: everything you've played, most recent first, with where it came from and how far you got |
 
 > The group names, dates and file sizes in the screenshots are made up (`test/readme-shots.mjs` replaces the
 > Telegram layer), and the players show a short excerpt. Every film can be shared legally: Blender open movies —
@@ -37,7 +39,9 @@ the original picture quality, and your phone is free as soon as the message is s
 > Sprite Fright, Charge, Elephants Dream, Coffee Run and Caminandes 3, © Blender Foundation / Blender Studio,
 > CC BY 2.5–4.0 — and from [archive.org](https://archive.org/), Sita Sings the Blues (Nina Paley, 2008, CC0),
 > The General (Buster Keaton, 1926) and His Girl Friday (Howard Hawks, 1940), the last two public domain in the US.
-> Covers are frames from the films; sources and licences per film are in `test/readme-shots.mjs`.
+> Covers are frames from the films; sources and licences per film are in `test/readme-shots.mjs`. The music is
+> [The Open Goldberg Variations](https://archive.org/details/OpenGoldbergVariations) (Kimiko Ishizaka, 2012, CC0), with
+> Haussmann's 1748 portrait of Bach (public domain) as the cover.
 
 ## What it does
 
@@ -63,6 +67,8 @@ the original picture quality, and your phone is free as soon as the message is s
   title or file name: `S01E03`, `EP03`, `E03`, `[03]`, `Show - 03`, and Chinese `第3集`.
 - **Search** every group and channel you are in, from the top of the source list — titles, captions and file
   names. Recent searches are kept, since typing with a remote is slow.
+- **History**, the second entry in the source list: the videos, web links and songs you've played, most recent first,
+  with the group each came from and how far you got. Each account keeps its own (up to 200); Settings can clear it.
 - **Music**: songs posted in your groups and channels (MP3, M4A, OGG / Opus, WAV and FLAC) sit in the grid alongside
   the videos, and channels with only songs appear in the source list too. Pick one and the rest play in order; Up / Down
   change track, and Back returns to the list while the music keeps playing. These TVs cannot decode FLAC themselves, so
@@ -93,7 +99,7 @@ part inside the brackets as the title.
 | Where | Button | Does |
 |---|---|---|
 | Grid | arrows, OK | move, play |
-| Grid | Left on the first column | open the source list (Search is its first entry; Account and the language switch are at the bottom) |
+| Grid | Left on the first column | open the source list (Search and History are at the top; Account and the language switch are at the bottom) |
 | Grid | Back, twice | quit |
 | Player | OK, or Play/Pause | pause / resume |
 | Player | **hold OK** (about 1 s) | menu: audio track, subtitles, subtitle timing, next episode |
@@ -118,6 +124,8 @@ All of these can be shared legally, and between them they exercise the main feat
   `https://archive.org/details/his_girl_friday`. Its [Feature Films](https://archive.org/details/feature_films)
   collection has many more — post the page of a single film; the collection page itself is not recognised. Some
   uploads there claim to be public domain when they are not, so check before you share.
+- **Music**: the MP3s of [The Open Goldberg Variations](https://archive.org/details/OpenGoldbergVariations) (Bach played
+  by Kimiko Ishizaka, CC0), posted to a channel or group.
 
 ## Will it run on my TV
 
@@ -231,6 +239,8 @@ mkvtoolnix for the MKV set), with the commands at the top of each script:
 | `check.mjs` | MP4 parser against ffprobe; the rebuilt fragments decoded by ffmpeg |
 | `check-mkv.mjs` | MKV parser frame by frame against ffprobe, including lacing, header stripping, missing Cues |
 | `check-subs.mjs` | subtitle encodings and formats; PGS rendering compared pixel by pixel with ffmpeg |
+| `check-flac.mjs` | the FLAC decoder, byte for byte against ffmpeg |
+| `legacy-bigint.mjs` | the big-number code of the Tizen 5.0 build, against native BigInt |
 | `i18n.mjs` | every interface string has an English translation |
 | `apikey.mjs` | where the API ID comes from, and the screen for entering one |
 | `run.mjs` | the playback engine in Chromium over a throttled server that imitates Telegram |
@@ -243,7 +253,7 @@ Conclusions and how to debug are in [`CLAUDE.md`](CLAUDE.md); the story behind e
 ## Layout
 
 ```
-app/              the client (no build step; mtcute is bundled into js/tg.bundle.js by deploy.sh)
+app/              the client (no build step; mtcute is bundled into js/tg.bundle.js, and js/tg.legacy.js for Tizen 5.0, by deploy.sh)
   js/app.js         screens and remote keys: sign-in, grid, player, menu, next episode, search
   js/i18n.js        interface language: English / Chinese
   js/accounts.js    several accounts: one session database each, per-person local records
@@ -261,7 +271,7 @@ app/              the client (no build step; mtcute is bundled into js/tg.bundle
   js/flac.js        FLAC software decoder (these TVs can't decode FLAC)
   js/web.js         web links (the framework)
   js/sites.js       the site rule the repository ships: archive.org (your own go in sites.local.js, not in the repository)
-build/            mtcute's bundle entry points (worker and main thread)
+build/            mtcute's bundle entry points (worker and main thread); legacy/ is the build for TVs without BigInt
 spike/            feasibility probes and engine measurements, not packaged
 test/             desktop tests
 tools/            deploy, release package (release.sh), self-update (update-*.mjs), log collector
@@ -272,6 +282,6 @@ docs/             the story and measurements behind each finding, by topic; READ
 
 ## Licence
 
-MIT. `app/js/vendor/hls.min.js` (hls.js) is Apache-2.0; mtcute and qrcode-generator, bundled at build time, are
-MIT. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Telegram is a trademark of its owner; this project is not
+MIT. `app/js/vendor/hls.min.js` (hls.js) is Apache-2.0; mtcute, qrcode-generator and bn.js, bundled at build time, are
+MIT, and JSBI (in the Tizen 5.0 build) is Apache-2.0. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Telegram is a trademark of its owner; this project is not
 affiliated with it.

@@ -21,12 +21,16 @@
 | 按左键滑出来源栏：有视频的群和频道 | 当文件发的 1.1GB MKV，边下边播；中文字幕是和片子发在同一个群里的 `.srt`（GBK 编码） |
 | ![字幕菜单](docs/screenshots/04-menu.jpg) | ![网页链接](docs/screenshots/05-web.jpg) |
 | 长按确认键：片子里带的 10 条字幕，加上群里的字幕文件 | 群里发的 archive.org 片子页链接：电视自己问出 1080p 原片来放 |
+| ![音乐](docs/screenshots/06-music.jpg) | ![播放记录](docs/screenshots/07-history.jpg) |
+| 频道里发的歌：点一首就按顺序放下去，按返回回到列表接着放 | 播放记录：放过的都在这，最近的在前，写着来自哪个群、看到哪里 |
 
 > 截图里的群名、日期和文件大小是编的（`test/readme-shots.mjs` 换掉了 Telegram 层），播放的是从片子里截的一段。片子都能合法转发：
 > Blender 的开源电影 [Sintel](https://durian.blender.org/)（官方发布的 MKV 和中文字幕）、Big Buck Bunny、Tears of Steel、Spring、
 > Sprite Fright、Charge、Elephants Dream、Coffee Run、Caminandes 3，© Blender Foundation / Blender Studio，CC BY（2.5–4.0）；
 > [archive.org](https://archive.org/) 上的 Sita Sings the Blues（Nina Paley，2008，CC0）、The General（Buster Keaton，1926）、
 > His Girl Friday（Howard Hawks，1940），后两部在美国是公有领域。封面是片中的画面，各片的出处和协议见 `test/readme-shots.mjs`。
+> 音乐是 [The Open Goldberg Variations](https://archive.org/details/OpenGoldbergVariations)（Kimiko Ishizaka 弹的巴赫，2012，CC0），
+> 专辑图是 Haussmann 1748 年画的巴赫像（公有领域）。
 
 ## 能做的
 
@@ -40,6 +44,7 @@
   `.srt` / `.ass` 文件（GBK、Big5 编码也认）。对白不是中文时自动开中文字幕。
 - **连续剧自动放下一集**（认「第 3 集」「S01E03」「EP03」「[03]」），放完倒计时 8 秒。
 - **搜索**：来源栏最上面，在所有群和频道里找视频和歌（片名、说明文字、文件名）。
+- **播放记录**：来源栏第二项，放过的视频、网页链接和歌，最近的在前，卡片上写着来自哪个群、看到哪里。每个账号各记各的，最多 200 条；设置里可以清空。
 - **音乐**：群和频道里的歌（MP3、M4A、OGG / Opus、WAV、FLAC）和视频混在网格里，只有歌的频道也在来源栏里。点一首就按顺序一首首放下去，
   ↑↓ 换歌；按返回回到列表时接着放。FLAC 电视自己解不了，应用里自己解（边下边解）。离开应用就停。
 - **封面**：缩略图太黑就从片子中间解一帧，电影去维基百科找海报。
@@ -64,6 +69,8 @@
   `https://archive.org/details/TheGeneral1926`、`https://archive.org/details/his_girl_friday`。它的
   [Feature Films](https://archive.org/details/feature_films) 合集里还有很多老电影 —— 要发单部片子的链接，合集页本身不认；
   合集里也有上传者自称公有领域、其实不是的，转发前看一眼。
+- **音乐**：[The Open Goldberg Variations](https://archive.org/details/OpenGoldbergVariations)（Kimiko Ishizaka 弹的巴赫《哥德堡变奏曲》，CC0）
+  的 MP3，发进一个频道或群。
 
 ## 我的电视能装吗
 
@@ -143,13 +150,13 @@ zsh tools/deploy.sh          # 终端 2
 ```
 
 桌面上的测试在 `test/`：`check.mjs` 对照 ffprobe 校验 MP4 解析，`check-mkv.mjs` 逐帧校验 MKV 解析，`check-subs.mjs` 校验字幕
-（PGS 和 ffmpeg 的渲染逐像素比），`run.mjs` 测播放引擎，`ui-emu.mjs` 用假数据把界面走一遍并截图，`readme-shots.mjs` 重拍 README 里的截图，`i18n.mjs` 检查界面上每句话都有英文，`apikey.mjs` 走一遍 API ID 从哪来和填写页（`ui-emu.mjs`、`readme-shots.mjs` 加 `UILANG=en` 跑英文界面）。
+（PGS 和 ffmpeg 的渲染逐像素比），`check-flac.mjs` 拿 ffmpeg 逐字节对 FLAC 解码，`legacy-bigint.mjs` 拿原生 BigInt 对拍 Tizen 5.0 那份的大数运算，`run.mjs` 测播放引擎，`ui-emu.mjs` 用假数据把界面走一遍并截图，`readme-shots.mjs` 重拍 README 里的截图，`i18n.mjs` 检查界面上每句话都有英文，`apikey.mjs` 走一遍 API ID 从哪来和填写页（`ui-emu.mjs`、`readme-shots.mjs` 加 `UILANG=en` 跑英文界面）。
 它们要 Playwright 和 ffmpeg（MKV 那套还要 mkvtoolnix），测试片自己生成（见各文件开头）。结论和调试方法在 [`CLAUDE.md`](CLAUDE.md)，每件事的前因后果和测量记录按主题在 [`docs/`](docs/)。
 
 ## 目录
 
 ```
-app/          客户端（ES5，没有构建步骤；mtcute 打成 js/tg.bundle.js，deploy.sh 现打）
+app/          客户端（ES5，没有构建步骤；mtcute 打成 js/tg.bundle.js 和 Tizen 5.0 用的 js/tg.legacy.js，deploy.sh 现打）
   js/app.js      界面和遥控器：登录、网格、播放器、菜单、下一集、搜索
   js/i18n.js     界面语言：中文 / 英文
   js/accounts.js 多账号：每个账号一个会话库，每人一份的本地记录
@@ -167,7 +174,7 @@ app/          客户端（ES5，没有构建步骤；mtcute 打成 js/tg.bundle.
   js/flac.js     FLAC 软件解码（电视解不了 FLAC）
   js/web.js      网页链接（框架）
   js/sites.js    仓库里带的站点规则：archive.org（本机自己写的在 sites.local.js，不进仓库）
-build/        mtcute 的打包入口（后台线程 + 主线程两份）
+build/        mtcute 的打包入口（后台线程 + 主线程两份）；legacy/ 是没有 BigInt 的电视用的那份
 spike/        可行性探测和引擎测量脚本，不进包
 test/         桌面测试
 tools/        部署、发布包（release.sh）、自动更新（update-*.mjs）、日志收集
@@ -178,6 +185,6 @@ docs/         每件事的前因后果、测量记录（按主题）；README �
 
 ## 协议
 
-MIT。`app/js/vendor/hls.min.js`（hls.js）是 Apache-2.0；打包时进来的 mtcute、qrcode-generator 是 MIT。
+MIT。`app/js/vendor/hls.min.js`（hls.js）是 Apache-2.0；打包时进来的 mtcute、qrcode-generator、bn.js 是 MIT，Tizen 5.0 那份里的 JSBI 是 Apache-2.0。
 见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。Telegram 是其所有者的商标，本项目与之无关联。
 
