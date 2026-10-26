@@ -1,157 +1,277 @@
-# 三星电视上放 Telegram 里的视频
+# Telegram videos on a Samsung TV
 
-**中文 · [English](README.en.md)**
+**English · [中文](README.zh.md)**
 
-给三星 Tizen 电视做的 Telegram 视频播放器：扫码登录，左边是有视频的群和频道，右边是视频网格，遥控器选了就放。
-边下边播，几个 GB 的长片也是几秒出画面、随便跳。电视直连 Telegram：**没有服务器，会话只存在电视本机。**
+A player for the videos in your Telegram groups and channels, on Samsung Tizen TVs. Sign in by scanning a QR
+code with your phone; the groups and channels that contain videos are on the left, a grid of their videos on the
+right, and the remote plays them. It streams while it downloads, so a multi-gigabyte film starts in seconds and
+you can seek anywhere. The TV talks to Telegram directly: **there is no server, and your session never leaves
+the set.**
 
-> **与 Telegram、三星均无关联。** 个人项目，MIT 协议。
-> 兄弟项目：[bilibili-tizen](https://github.com/titlog/bilibili-tizen)、[douyin-tizen](https://github.com/titlog/douyin-tizen)。
+The everyday use it was built for: find a film on your phone, forward it to a group of your own, and play it on
+the TV. Everything Telegram can play on a phone — MP4s sent as videos, MKVs and MP4s sent as files, links to
+`.m3u8` streams — plays here. **It is not screen mirroring:** the TV fetches the original file itself, so you get
+the original picture quality, and your phone is free as soon as the message is sent.
 
-![视频网格](docs/screenshots/01-home.jpg)
+> **The interface is in English or Chinese.** It follows the TV's system language — Chinese if the TV is set to
+> Chinese, English otherwise — and the last entry of the source list switches it.
 
-*一个来源里的视频，三列；看过的带进度条。*
+> **Not affiliated with Telegram or Samsung.** A personal project, MIT licence.
+> Sister projects: [bilibili-tizen](https://github.com/titlog/bilibili-tizen),
+> [douyin-tizen](https://github.com/titlog/douyin-tizen).
 
-| | |
-|---|---|
-| ![来源栏](docs/screenshots/02-sources.jpg) | ![播放](docs/screenshots/03-player.jpg) |
-| 按左键滑出来源栏：有视频的群和频道 | 边下边播，从上次看到的地方接着放 |
+![The video grid](docs/screenshots/en-01-home.jpg)
 
-> 截图里的群名、日期和文件大小是编的（`test/readme-shots.mjs` 换掉了 Telegram 层）。视频都是 Blender 的开源电影：
-> [Sintel](https://durian.blender.org/)（播放的是它的预告片）、Big Buck Bunny、Elephants Dream、Tears of Steel、Spring、
-> Sprite Fright、Charge、Coffee Run、Caminandes 3，© Blender Foundation / Blender Studio，CC BY（2.5–4.0），
-> 封面是片中的画面。各片的作者、出处和协议版本见 `test/readme-shots.mjs`。
-
-## 能做的
-
-- **扫码登录**（[mtcute](https://github.com/mtcute/mtcute)，客户端跑在后台线程，界面不卡），会话活得过重新安装。
-- **来源栏**只列有视频的群和频道；视频网格三列，记得每部看到哪里，开机直接进上次的来源。
-- **自己写的 MP4 / MKV 解析 + MSE 边下边播**：2.6GB 的电影 5.8 秒出画面，跳到没缓冲的地方 0.6 秒；
-  音视频在文件里隔得很远的片子分两路读。当文件发的视频（MKV、不压缩发的 MP4）也在网格里。
-  MKV 支持 H.264 / HEVC / VP9 / AV1，AAC / AC-3 / E-AC-3 / Opus / FLAC（DTS、TrueHD 电视放不了）。
-- **多音轨、字幕**：播放时长按确认键开菜单，换音轨（国语 / 粤语 / 原声）、开字幕、调字幕时间。
-  字幕可以是片子里带的（MP4 的 mov_text，MKV 的 SRT / ASS / PGS 图形字幕），也可以是和片子发在同一个群里的
-  `.srt` / `.ass` 文件（GBK、Big5 编码也认）。对白不是中文时自动开中文字幕。
-- **连续剧自动放下一集**（认「第 3 集」「S01E03」「EP03」「[03]」），放完倒计时 8 秒。
-- **搜索**：来源栏最上面，在所有群和频道里找视频（片名、说明文字、文件名）。
-- **封面**：缩略图太黑就从片子中间解一帧，电影去维基百科找海报。
-- **网页链接**：群里发的 `.m3u8` / `.mp4` 链接直接放。别的网站要一条站点规则 —— 仓库里**一条都不带**，
-  自己写在 `app/js/sites.local.js` 里（不进仓库），格式见 [`app/js/web.js`](app/js/web.js) 开头。
-- 切到别的应用再回来，自动重连。
-- **一台电视好几个账号**：来源栏里的「账号」可以添加（扫码）、切换（不用重新扫码）、退出。每个人的来源、看到哪里各记各的。
-- **中英双语界面**：跟电视的系统语言走（系统是中文就中文，别的都英文），来源栏最下面可以切换。
-- **自动更新**（1.1.0 起）：开着应用时查到新版本就在后台下载，下次打开生效，屏幕上提示「已更新到 x.y.z」。
-- **诊断日志**（1.1.0 起）：出问题时，应用会收集一些排查必要的运行信息传给开发者，不会泄露个人隐私。来源栏的「设置」里可以关掉；
-  报问题时附上那里显示的这台电视的编号。
-
-## 我的电视能装吗
+*Videos and web links forwarded to one group, three to a row; ones you have started show a progress bar.*
 
 | | |
 |---|---|
-| **实测可用** | 三星 2023 年款 65 吋 **CU7090**，固件 Tizen 9.0（Chromium 120） |
-| **其他机型** | 没人试过。装成功或者失败，都欢迎开 issue 说一声机型和固件版本 |
+| ![Source list](docs/screenshots/en-02-sources.jpg) | ![Playing an MKV](docs/screenshots/en-03-player.jpg) |
+| Press Left to slide out the source list: the groups and channels that have videos | A 1.1 GB MKV sent as a file, streaming, with its English subtitle track on |
+| ![Subtitle menu](docs/screenshots/en-04-menu.jpg) | ![A web link](docs/screenshots/en-05-web.jpg) |
+| Hold OK: the ten subtitle tracks inside the file, plus a subtitle file posted in the group | An archive.org film page posted in the group: the TV looks up the 1080p original and plays it |
 
-## 安装
+> The group names, dates and file sizes in the screenshots are made up (`test/readme-shots.mjs` replaces the
+> Telegram layer), and the players show a short excerpt. Every film can be shared legally: Blender open movies —
+> [Sintel](https://durian.blender.org/) (its official MKV release and subtitles), Big Buck Bunny, Tears of Steel, Spring,
+> Sprite Fright, Charge, Elephants Dream, Coffee Run and Caminandes 3, © Blender Foundation / Blender Studio,
+> CC BY 2.5–4.0 — and from [archive.org](https://archive.org/), Sita Sings the Blues (Nina Paley, 2008, CC0),
+> The General (Buster Keaton, 1926) and His Girl Friday (Howard Hawks, 1940), the last two public domain in the US.
+> Covers are frames from the films; sources and licences per film are in `test/readme-shots.mjs`.
 
-三星商店不收第三方客户端，只能侧载。**只需要一次**，之后电视上直接开。两条路：
+## What it does
 
-| | 装发布包（推荐） | 从源码装 |
+- **QR sign-in** with [mtcute](https://github.com/mtcute/mtcute), which runs in a worker so the interface never
+  stutters while data arrives. The session survives reinstalling the app. Two-step verification passwords are
+  supported.
+- **Source list** of only the chats that actually contain videos. It opens straight into the chat you used last and
+  remembers how far you got in every video.
+- **Hand-written MP4 and MKV parsers feeding Media Source Extensions.** Measured on the TV: a 2.6 GB, 3 h 39 min
+  film shows its first frame in 5.8 s, and a jump to a part that is not downloaded yet plays in 0.6 s. Files whose
+  audio and video are stored far apart (some 4K releases) are read along two paths so resuming does not have to
+  download hundreds of megabytes first.
+- **Videos sent as files show up too** — most MKVs are posted that way, and Telegram's own "videos" filter does not
+  list them. MKV/WebM support: H.264, HEVC, VP9 and AV1 video; AAC, AC-3, E-AC-3, Opus and FLAC
+  audio. These TVs cannot decode DTS or TrueHD; when a file has another audio track the player switches to it,
+  otherwise it plays without sound and says so.
+- **Audio tracks and subtitles.** Hold OK while a video plays to open a menu: switch audio tracks (dubs, original,
+  commentary), turn subtitles on, or shift their timing in 0.5 s steps. Subtitles can come from inside the file
+  (mov_text in MP4; SRT, ASS and PGS image subtitles in MKV) or from an `.srt` / `.ass` / `.vtt` file posted in
+  the same group — it matches the file to the video by name and posting time, and detects UTF-8, UTF-16, GBK and
+  Big5. Your choice is remembered per video.
+- **Series play the next episode** when one ends, with an 8-second countdown. Episode numbers are read from the
+  title or file name: `S01E03`, `EP03`, `E03`, `[03]`, `Show - 03`, and Chinese `第3集`.
+- **Search** every group and channel you are in, from the top of the source list — titles, captions and file
+  names. Recent searches are kept, since typing with a remote is slow.
+- **Music**: songs posted in your groups and channels (MP3, M4A, OGG / Opus, WAV and FLAC) sit in the grid alongside
+  the videos, and channels with only songs appear in the source list too. Pick one and the rest play in order; Up / Down
+  change track, and Back returns to the list while the music keeps playing. These TVs cannot decode FLAC themselves, so
+  the app decodes it while downloading. Music stops when you leave the app.
+- **Covers**: when the thumbnail is a black first frame (common with large files), a frame from the middle of the
+  film is decoded instead; films get a poster from Wikipedia.
+- **Web links**: `.m3u8` and `.mp4` links posted in a group play directly, and so do **archive.org film pages** —
+  the one site rule the repository ships (`app/js/sites.js`) asks archive.org's public API for the item's files and
+  picks the sharpest MP4, up to 1080p. Other sites need a site rule, which you write yourself in
+  `app/js/sites.local.js` (it is not in the repository); the format is at the top of [`app/js/web.js`](app/js/web.js).
+  Services with DRM cannot be played, and YouTube is not attempted.
+- Switch to another app and back, and it reconnects on its own.
+- **Several accounts on one TV**: the Account entry in the source list adds accounts (by QR code), switches between
+  them without scanning again, and signs them out. Everyone's sources and progress are kept separately.
+- **Self-update** (from 1.1.0): a newer signed version is downloaded in the background while the app is open and runs
+  from the next launch, with an "Updated to x.y.z" notice.
+- **Diagnostic logs** (from 1.1.0): when something goes wrong, the app sends the developer the information needed to
+  find out why, and nothing that identifies you. It can be switched off under Settings in the source list; when
+  reporting a problem, quote the TV's code shown there.
+
+Subtitles turn on by themselves only when the dialogue is not in the interface language **and** a subtitle track or
+file in that language exists — with the English interface, an English subtitle for a film in another language;
+otherwise they start off and the menu has them. Captions written the way Chinese channels do, `《Title》`, use the
+part inside the brackets as the title.
+
+## The remote
+
+| Where | Button | Does |
 |---|---|---|
-| 适合 | 只想在电视上看 | 要改代码、要看诊断日志 |
-| 需要 | 电脑（Windows / macOS / Linux）**或安卓手机**，装上 [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung) | macOS、Node、Tizen Studio 命令行工具，以及你自己申请的 Telegram API ID |
-| 升级 | **1.1.0 起自动更新**；1.0.0 要用 Apps2Samsung 再装一次（扫码登录和看到哪里都留着） | `git pull`，再跑一次 `deploy.sh` |
+| Grid | arrows, OK | move, play |
+| Grid | Left on the first column | open the source list (Search is its first entry; Account and the language switch are at the bottom) |
+| Grid | Back, twice | quit |
+| Player | OK, or Play/Pause | pause / resume |
+| Player | **hold OK** (about 1 s) | menu: audio track, subtitles, subtitle timing, next episode |
+| Player | Left / Right | −/+ 15 s; keep holding and the steps grow to 30 s, 1 min, 2 min, 5 min |
+| Player | Up / Down, or Fast-forward / Rewind | +/− 1 min; holding grows to 2, 5, 10, 15 min |
+| Player | Back | back to the grid (your position is saved) |
+| Source list | Account | switch accounts, add one, or sign the current one out (press OK twice) |
 
-**两条路都要先做这一步：** 电视上打开开发者模式——在「应用」页面用遥控器输入 `12345`，打开开关，Host PC IP 填装应用的
-那台电脑或手机的 IP——然后**把电视完整断电重启一次**。
+Seeks are applied 0.7 s after you stop pressing, so you can press several times and only download once.
 
-两条路都还要一个三星账号（没有就免费注册一个）：第一次安装时会让你登录，用来给这台电视申请证书，之后不用再管。
+## Things to try
 
-### 装发布包
+All of these can be shared legally, and between them they exercise the main features:
 
-1. 装 [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung/releases)，电脑版、安卓版都行。
-2. 打开它，选中你的电视（列表里没有就手动输入电视的 IP）。
-3. 在它的应用列表（社区目录）里找到 **Telegram Videos**，安装。第一次会让你登录三星账号，替这台电视签证书。
-4. 电视上打开「TG 视频」，手机打开 Telegram → 设置 → 设备 → 关联桌面设备，扫码。
+- **MKV, many subtitle tracks, a subtitle file**: Blender's official
+  [`Sintel.2010.1080p.mkv`](https://download.blender.org/durian/movies/) (1.1 GB, H.264 1080p + AC-3 5.1 + ten subtitle
+  tracks), sent to your group as a file. Subtitles in more languages are at
+  [download.blender.org/durian/subs](https://download.blender.org/durian/subs/); name one like the film
+  (`Sintel.2010.1080p.chs.srt`) and post it in the same group, and the TV pairs them.
+- **Web links**: post archive.org film pages in the group, for example
+  `https://archive.org/details/Sita_Sings_the_Blues` (1080p animation), `https://archive.org/details/TheGeneral1926`,
+  `https://archive.org/details/his_girl_friday`. Its [Feature Films](https://archive.org/details/feature_films)
+  collection has many more — post the page of a single film; the collection page itself is not recognised. Some
+  uploads there claim to be public domain when they are not, so check before you share.
 
-社区目录每天从这里同步一次最新的发布包。想装目录还没同步到的新版本，或者某个指定版本：到
-[Releases](https://github.com/titlog/telegram-tizen/releases/latest) 下载 `telegram-tizen-<版本>.wgt`，第 3 步改选自定义
-`.wgt`，选这个文件。
+## Will it run on my TV
 
-发布包带着这个项目的 Telegram API ID，装上就能扫码。万一哪天 Telegram 不再接受它，应用会请你填一组自己在
-[my.telegram.org](https://my.telegram.org) 申请的（电视上有去那里的二维码），填一次就行。
+| | |
+|---|---|
+| **Tested** | Samsung 2023 65" **CU7090**, firmware Tizen 9.0 (Chromium 120) |
+| **Minimum** | Tizen 5.5 (roughly 2020 models onwards; before 1.2.0 it needed 6.0). Tizen 5.0 and older cannot run it: the Telegram client library needs BigInt, which that browser (Chromium 63) lacks |
+| **Other models** | Untested. Whether it works or not, please open an issue with your model and firmware version (Settings → Support → About This TV) |
 
-**只有 iPhone？** Apps2Samsung 没有 iOS 版，侧载要一台电脑或者一部安卓手机。不过只需要装一次（之后新版本电视自己装），
-借一台电脑装一次就够了。
+Download speed is Telegram's, not your connection's: without Premium the TV measured a steady 1.7–2.3 MB/s, about
+ten times the bitrate of the 1080p film it was measured with. High-bitrate 4K remuxes can be faster than that and will pause to
+buffer. The TV connects to Telegram over WebSocket (`*.web.telegram.org`); there is no proxy setting.
 
-### 从源码装
+## Install
 
-1. 电视、开发者模式、三星证书、签名档都沿用 [bilibili-tizen](https://github.com/titlog/bilibili-tizen) 的配置：
-   先按它 README 里「从源码装」那一节跑一次 `zsh tools/setup.sh`。
-2. 到 [my.telegram.org](https://my.telegram.org) 申请一个应用，拿到 API ID 和 API Hash，写进 `~/.telegram-tizen.conf`：
+Samsung's store does not accept third-party clients, so this is sideloaded. **It only has to be done once**; after
+that the app opens from the TV like any other. Two ways:
+
+| | Release package (recommended) | From source |
+|---|---|---|
+| For | just watching on the TV | changing the code, reading the diagnostic logs |
+| Needs | a computer (Windows / macOS / Linux) **or an Android phone** with [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung) | macOS, Node, the Tizen Studio command-line tools, and a Telegram API ID of your own |
+| Updating | **updates itself from 1.1.0**; on 1.0.0 install it once more with Apps2Samsung (the sign-in and watch history are kept) | `git pull`, then `deploy.sh` again |
+
+**Both start with this:** enable Developer Mode on the TV — on the Apps screen type `12345` on the remote, switch it on,
+set Host PC IP to the computer or phone you install from — then **power-cycle the set** (unplug it).
+
+Both ways also need a Samsung account (free to create): the first install asks you to sign in, to get this TV
+a certificate, and that is all.
+
+### Release package
+
+1. Install [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung/releases) (desktop or Android).
+2. Open it and pick your TV (or type its IP).
+3. Find **Telegram Videos** in its app list (the community catalog) and install it. The first time it asks you to sign
+   in to a Samsung account so it can get a certificate for this TV.
+4. Open "TG Video" on the TV; on your phone open Telegram → **Settings → Devices → Link Desktop Device** and scan the code.
+
+The catalog picks up the latest release from here once a day. For a version it has not picked up yet, or a specific
+one, download `telegram-tizen-<version>.wgt` from [Releases](https://github.com/titlog/telegram-tizen/releases/latest)
+and choose a custom `.wgt` in step 3 instead.
+
+The release package ships with this project's Telegram API ID, so it signs in straight away. Should Telegram ever stop
+accepting it, the app asks for one of your own from [my.telegram.org](https://my.telegram.org) (the TV shows a code that
+opens it), once.
+
+**Only an iPhone?** Apps2Samsung has no iOS version; sideloading takes a computer or an Android phone. It is needed once
+(after that the TV installs new versions itself), so borrowing a computer for the install is enough.
+
+### From source
+
+You need **macOS**, Node, and the [Tizen Studio](https://developer.tizen.org/development/tizen-studio/download)
+command-line tools (not the IDE).
+
+1. **TV, developer mode and the Samsung certificate.** These are shared with
+   [bilibili-tizen](https://github.com/titlog/bilibili-tizen) — the same TV and certificate work for both. Follow its
+   [From source](https://github.com/titlog/bilibili-tizen/blob/master/README.en.md#from-source) section once: enable
+   Developer Mode on the TV (on the Apps screen type `12345`, switch it on, set Host PC IP to your computer, then
+   power-cycle the set), and run its `zsh tools/setup.sh`, which finds the TV, reads its DUID and obtains the
+   Samsung-issued certificate (2023+ sets reject the certificates that come with Tizen Studio). The settings end up
+   in `~/.bilibili-tizen.conf`, which this project reads.
+2. **Your Telegram API ID.** Create an application at [my.telegram.org](https://my.telegram.org) → API development
+   tools, and put the two values in `~/.telegram-tizen.conf`:
    ```bash
    TG_API_ID=1234567
    TG_API_HASH=0123456789abcdef0123456789abcdef
    ```
-   这两个值只在打包时写进你自己的安装包，打完就从源码里改回空值，不会进仓库。
-3. 装好 Node，然后：
+   They are written into your package only while it is being built and put back to empty values in the source
+   straight after, so they never end up in the repository.
+3. **Build and install:**
    ```bash
    git clone https://github.com/titlog/telegram-tizen.git && cd telegram-tizen
-   zsh tools/deploy.sh          # 打包 mtcute、签名、安装、启动
+   zsh tools/deploy.sh          # bundles mtcute, signs, installs and launches
    ```
+4. On the TV, open Telegram on your phone → **Settings → Devices → Link Desktop Device**, and scan the code.
 
-更新：`git pull` 之后再跑一次 `deploy.sh`。
+To update: `git pull`, then run `deploy.sh` again. Your session and watch history are kept.
 
-> **两条路不要来回换。** 两边签名用的证书不同，电视不让一个证书签的包覆盖另一个证书签的同名应用。要换路，先在电视上把
-> 旧的删掉再装——删掉会清空扫码登录和看到哪里，要重新扫一次。
+> **Don't switch between the two.** They are signed with different certificates, and the TV will not let a package
+> signed with one replace the same app signed with the other. To switch, delete the old one on the TV first — which
+> clears the sign-in and watch history.
 
-## 账号与隐私
+## Accounts and privacy
 
-- 扫码登录，会话存在电视的 IndexedDB 里，不经过任何别的服务器。多个账号各存各的库；切换不要密码，拿着遥控器就能切。
-  退出一个账号会让 Telegram 作废这个会话，并删掉电视上这个人的记录。
-- 发布包带着这个项目的 API ID / Hash；从源码装的用你自己申请的，只打进你自己的安装包。在电视上填过的（内置的那组不能用时）只存在电视本机。
-- 从源码装的版本，诊断日志和发布包一样会传（1.1.4 起），设置里能关；也可以在 `~/.telegram-tizen.conf` 里写一行
-  `TG_DIAG_TO=off`，这样装出来的构建就不传。
-- 网页登录（有的站的列表要登录）：密码不存、不写日志，只记下网站回的账号编号。
+- You sign in by QR code; the session is stored in the TV's IndexedDB and goes through no other server. Each account
+  has its own database. Switching accounts needs no password — anyone holding the remote can switch. Signing an
+  account out ends that session on Telegram's side and deletes that person's records from the TV.
+- The release package ships with this project's API ID and hash; built from source, it uses your own, which only go into
+  your own package. One entered on the TV (if the built-in one stops working) is stored on the TV only.
+- Built from source, the app sends diagnostic logs just like the release package (from 1.1.4), and they can be
+  switched off in Settings; or add the line `TG_DIAG_TO=off` to `~/.telegram-tizen.conf` and builds from that
+  computer send nothing.
+- Web sign-in (some site lists need it): the password is not stored or logged; only the account number the site
+  returns is kept.
 
-## 调试
+## Debugging and tests
 
 ```bash
-node tools/collect.mjs       # 终端 1：在 8097 端口收电视上报的日志
-zsh tools/deploy.sh          # 终端 2
+node tools/collect.mjs       # terminal 1: receives the TV's logs on port 8097
+zsh tools/deploy.sh          # terminal 2
 ```
 
-桌面上的测试在 `test/`：`check.mjs` 对照 ffprobe 校验 MP4 解析，`check-mkv.mjs` 逐帧校验 MKV 解析，`check-subs.mjs` 校验字幕
-（PGS 和 ffmpeg 的渲染逐像素比），`run.mjs` 测播放引擎，`ui-emu.mjs` 用假数据把界面走一遍并截图，`readme-shots.mjs` 重拍 README 里的截图，`i18n.mjs` 检查界面上每句话都有英文，`apikey.mjs` 走一遍 API ID 从哪来和填写页（`ui-emu.mjs`、`readme-shots.mjs` 加 `UILANG=en` 跑英文界面）。
-它们要 Playwright 和 ffmpeg（MKV 那套还要 mkvtoolnix），测试片自己生成（见各文件开头）。全部测量、坑和调试方法在 [`CLAUDE.md`](CLAUDE.md)。
+Web Inspector does not open on retail sets, so the app reports what it does to the collector — start-up times,
+codecs, track lists, every seek and stall.
 
-## 目录
+Desktop tests live in `test/` and need Playwright and ffmpeg; the test files are generated with ffmpeg (and
+mkvtoolnix for the MKV set), with the commands at the top of each script:
+
+| | |
+|---|---|
+| `check.mjs` | MP4 parser against ffprobe; the rebuilt fragments decoded by ffmpeg |
+| `check-mkv.mjs` | MKV parser frame by frame against ffprobe, including lacing, header stripping, missing Cues |
+| `check-subs.mjs` | subtitle encodings and formats; PGS rendering compared pixel by pixel with ffmpeg |
+| `i18n.mjs` | every interface string has an English translation |
+| `apikey.mjs` | where the API ID comes from, and the screen for entering one |
+| `run.mjs` | the playback engine in Chromium over a throttled server that imitates Telegram |
+| `ui-emu.mjs` | the whole interface with fake data, driven by key presses, with screenshots (`UILANG=en` for English) |
+| `readme-shots.mjs` | retakes the screenshots above (`UILANG=en` for these, without it the Chinese set) |
+
+Conclusions and how to debug are in [`CLAUDE.md`](CLAUDE.md); the story behind each one, with measurements, is in
+[`docs/`](docs/) by topic (both in Chinese).
+
+## Layout
 
 ```
-app/          客户端（ES5，没有构建步骤；mtcute 打成 js/tg.bundle.js，deploy.sh 现打）
-  js/app.js      界面和遥控器：登录、网格、播放器、菜单、下一集、搜索
-  js/i18n.js     界面语言：中文 / 英文
-  js/accounts.js 多账号：每个账号一个会话库，每人一份的本地记录
-  js/apikey.js   用哪组 Telegram API ID：安装包带的，或者电视上填的
-  js/boot.js     这次跑哪份代码：安装包的，还是自动更新下载、验过签名的新版本
-  js/update.js   自动更新：查新版本、下载、验签名
-  js/diag.js     诊断日志：去掉身份记一圈，出事或手动时传给开发者
-  js/tg.js       Telegram 这一层：来源、视频（当视频发的和当文件发的）、搜索、字幕文件、给播放器的数据源
-  js/player.js   MSE 播放引擎
-  js/mp4.js      渐进式 MP4 → fMP4
-  js/mkv.js      MKV / WebM → fMP4
-  js/subs.js     字幕：文件、片子里的文字字幕、PGS、画到屏幕上
-  js/cover.js    封面：解一帧、维基百科海报
-  js/web.js      网页链接（框架，站点规则另写）
-build/        mtcute 的打包入口（后台线程 + 主线程两份）
-spike/        可行性探测和引擎测量脚本，不进包
-test/         桌面测试
-tools/        部署、发布包（release.sh）、自动更新（update-*.mjs）、日志收集
-update/       自动更新的签名 manifest 和更新包
-CLAUDE.md     全部发现、坑，以及怎么在零售机上调试
+app/              the client (no build step; mtcute is bundled into js/tg.bundle.js by deploy.sh)
+  js/app.js         screens and remote keys: sign-in, grid, player, menu, next episode, search
+  js/i18n.js        interface language: English / Chinese
+  js/accounts.js    several accounts: one session database each, per-person local records
+  js/apikey.js      which Telegram API ID to use: the one the package ships with, or one entered on the TV
+  js/boot.js        which code this launch runs: the package's, or a newer signed version downloaded by the self-update
+  js/update.js      self-update: check, download, verify the signature
+  js/diag.js        diagnostic logs: an identity-scrubbed ring, sent to the developer when something goes wrong or by hand
+  js/tg.js          the Telegram layer: chats, videos (sent as videos and as files), search, subtitle files
+  js/player.js      MSE playback engine
+  js/mp4.js         progressive MP4 → fragmented MP4
+  js/mkv.js         MKV / WebM demuxer → fragmented MP4
+  js/subs.js        subtitles: files, embedded text, PGS, rendering
+  js/cover.js       covers: a decoded frame, Wikipedia posters
+  js/music.js       music: download the whole track and play it, queue, prefetch the next one
+  js/flac.js        FLAC software decoder (these TVs can't decode FLAC)
+  js/web.js         web links (the framework)
+  js/sites.js       the site rule the repository ships: archive.org (your own go in sites.local.js, not in the repository)
+build/            mtcute's bundle entry points (worker and main thread)
+spike/            feasibility probes and engine measurements, not packaged
+test/             desktop tests
+tools/            deploy, release package (release.sh), self-update (update-*.mjs), log collector
+update/           the self-update's signed manifest and bundle
+CLAUDE.md         conclusions, rules, and how to debug on a retail set
+docs/             the story and measurements behind each finding, by topic; README screenshots
 ```
 
-## 协议
+## Licence
 
-MIT。`app/js/vendor/hls.min.js`（hls.js）是 Apache-2.0；打包时进来的 mtcute、qrcode-generator 是 MIT。
-见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。Telegram 是其所有者的商标，本项目与之无关联。
-
+MIT. `app/js/vendor/hls.min.js` (hls.js) is Apache-2.0; mtcute and qrcode-generator, bundled at build time, are
+MIT. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Telegram is a trademark of its owner; this project is not
+affiliated with it.

@@ -23,7 +23,7 @@
     function errStr(e) { return (e && (e.message || e.text || e.name)) || String(e); }
 
     try {
-        ["MediaPlayPause", "MediaPlay", "MediaPause", "MediaStop", "MediaFastForward", "MediaRewind"].forEach(function (k) {
+        ["MediaPlayPause", "MediaPlay", "MediaPause", "MediaStop", "MediaFastForward", "MediaRewind", "MediaTrackPrevious", "MediaTrackNext"].forEach(function (k) {
             tizen.tvinputdevice.registerKey(k);
         });
     } catch (e) {}
@@ -756,12 +756,16 @@
         var p = Store.getProgress(it.fileKey);
         var x = LEFT + (i % COLS) * (CARD_W + GAP_X), y = TOP + Math.floor(i / COLS) * PITCH_Y;
         var th = S.thumbs[it.fileKey];
-        var ext = it.asFile && /\.(mkv|webm|mov|m4v)$/i.exec(it.fileName || "");
-        var meta = [S.src && S.src.kind === "search" ? it.chatTitle : "", it.kind === "web" ? T("网页 · {0}", it.site) : (ext ? ext[1].toUpperCase() + " · " : "") + fmtSize(it.size), fmtDate(it.date)].filter(Boolean).join(" · ");
+        var ext = it.asFile && /\.(mkv|webm|mov|m4v)$/i.exec(it.fileName || ""), mu = it.kind === "music";
+        var what = mu ? [it.performer, (it.ext || "").toUpperCase(), fmtSize(it.size)].filter(Boolean).join(" · ") :
+            it.kind === "web" ? T("网页 · {0}", it.site) : (ext ? ext[1].toUpperCase() + " · " : "") + fmtSize(it.size);
+        var meta = [S.src && S.src.kind === "search" ? it.chatTitle : "", what, fmtDate(it.date)].filter(Boolean).join(" · ");
+        var now = mu && S.mu.item && S.mu.item.fileKey === it.fileKey;
         if (p && p.done) { meta = T("看完了 · {0}", meta); }
         else if (p && p.t > 0) { meta = T("看到 {0} · {1}", fmtTime(p.t), meta); }
         return "<div class='card' id='c" + i + "' style='left:" + x + "px;top:" + y + "px'>" +
-            "<div class='thumb" + (th && th.kind === "poster" ? " hasposter" : "") + "'><div class='ph' style='" + phStyle(it.title) + "'><span>" + esc(it.title) + "</span></div>" + (th && th.url ? coverHtml(it, th) : "") +
+            "<div class='thumb" + (th && (th.kind === "poster" || th.kind === "art") ? " hasposter" : "") + "'><div class='ph' style='" + phStyle(it.title) + "'><span>" + esc(it.title) + "</span></div>" + (th && th.url ? coverHtml(it, th) : "") +
+            (now ? "<div class='now'>" + esc(T("♪ 正在放")) + "</div>" : "") +
             (it.duration ? "<div class='dur'>" + fmtTime(it.duration) + "</div>" : "") +
             (p && p.t > 0 && p.d ? "<div class='prog' style='width:" + Math.min(100, p.t / p.d * 100).toFixed(1) + "%'></div>" : "") +
             "</div><div class='title'>" + esc(it.title) + "</div><div class='meta'>" + esc(meta) + "</div></div>";
@@ -787,7 +791,8 @@
             $("empty").innerHTML = "";
         }
         if (S.src && !S.loading) {
-            $("src-sub").textContent = S.total ? T("共 {0} 个视频", S.total) + (S.items.length < S.total ? T("（已加载 {0}）", S.items.length) : "") : "";
+            var mixed = S.items.some(function (it) { return it.kind === "music"; });
+            $("src-sub").textContent = S.total ? (mixed ? T("共 {0} 个视频和音乐", S.total) : T("共 {0} 个视频", S.total)) + (S.items.length < S.total ? T("（已加载 {0}）", S.items.length) : "") : "";
         }
         updateFocus();
     }
@@ -823,7 +828,7 @@
     }
     function setThumb(it, c) {
         /* 海报先做一张「缩小再放大」的背景（见 posterBg），做好了再放上去 */
-        if (c.kind === "poster" && !c.bg) {
+        if ((c.kind === "poster" || c.kind === "art") && !c.bg) {
             posterBg(c.url).then(function (bg) { c.bg = bg || "none"; setThumb(it, c); });
             return;
         }
@@ -832,7 +837,7 @@
         if (el) {
             var th = el.querySelector(".thumb");
             th.querySelectorAll("img, .pbg").forEach(function (n) { n.remove(); });
-            th.classList.toggle("hasposter", c.kind === "poster");
+            th.classList.toggle("hasposter", c.kind === "poster" || c.kind === "art");
             th.insertAdjacentHTML("beforeend", coverHtml(it, c));
         }
     }
@@ -840,9 +845,9 @@
     /* 海报是竖的、卡片是横的：海报完整居中，两边用同一张海报铺底（用户 2026-10-01：卡片上不要字，只放海报，片名看卡片下面）。
      * 底图是把海报画进 24×14 的小画布再拉伸 —— 缩小本身就是模糊，不用 CSS 滤镜（抖音项目实测滤镜在这台电视上很贵）。 */
     function coverHtml(it, c) {
-        if (c.kind !== "poster") { return "<img src='" + c.url + "'>"; }
+        if (c.kind !== "poster" && c.kind !== "art") { return "<img src='" + c.url + "'>"; }
         return (c.bg && c.bg !== "none" ? "<div class='pbg' style='background-image:url(" + c.bg + ")'></div>" : "") +
-            "<img class='pimg' src='" + c.url + "'>";
+            "<img class='" + (c.kind === "art" ? "aimg" : "pimg") + "' src='" + c.url + "'>";
     }
 
     function posterBg(url) {
@@ -964,7 +969,7 @@
                 /* 顺序（用户 2026-10-01：群里的优先，网上搜的兜底）：频道给视频设的封面 → Telegram 缩略图（不太暗的话）
                  * → 从片子里解一帧 → 电影（≥40 分钟）的维基百科海报 → 片名卡片。
                  * 定下来的结果（包括「没有」）都存在电视上，下次直接用。缓存里存的不是频道封面、而这条有频道封面的（以前没读这个字段），重新取。 */
-                (it.kind === "web" ? webThumb(it) : Cover.cached(it).then(function (c) {
+                (it.kind === "web" ? webThumb(it) : it.kind === "music" ? musicArt(it) : Cover.cached(it).then(function (c) {
                     if (c && (c.kind === "cover" || !it.hasCover)) { if (c.kind !== "none") { setThumb(it, c); } return; }
                     var first = it.hasCover ? TG.cover(it, CARD_W).catch(function (e) { R("频道封面出错「" + Diag.priv(it.title) + "」" + errStr(e)); return null; }) : Promise.resolve(null);
                     return first.then(function (cv) {
@@ -1016,6 +1021,8 @@
 
     /* opts.reopen：同一部片在当前位置重开（换音轨），字幕、菜单的状态留着 */
     async function play(it, opts) {
+        if (it.kind === "music") { playMusic(it); return; }
+        if (music.current()) { stopMusic("放视频"); }
         opts = opts || {};
         var again = !!opts.reopen && S.playing === it;
         S.screen = "player";
@@ -1036,20 +1043,29 @@
         await Cover.cancel();
         if (!again) { findSubFiles(it); }
         if (it.kind === "web") { playWeb(it, startAt); return; }
+        openMse(it, TG.source(it), startAt, opts, again);
+    }
+
+    /* 播放引擎（player.js）：Telegram 的片子，和网页链接里的 MP4（web.js 的 httpSource）。网页的 moov 缓存按地址 + 大小记：
+     * 同一个页面换了片子文件，大小多半跟着变，不会套上旧的 moov */
+    async function openMse(it, src, startAt, opts, again) {
         player = mse;
-        var moov = await Store.getMoov(it.fileKey);
+        var web = it.kind === "web", mkey = web ? it.fileKey + "|" + src.size : it.fileKey;
+        var moov = await Store.getMoov(mkey);
         if (S.playing !== it) { return; }
         var pref = Store.getPrefs(it.fileKey);
-        R((again ? "换音轨重开「" : "播放「") + Diag.priv(it.title) + "」" + fmtSize(it.size) + " " + fmtTime(it.duration) + (it.asFile ? "（文件 " + Diag.priv(it.fileName || it.mime) + "）" : "") +
-          (startAt ? "，从 " + fmtTime(startAt) + (again ? "" : " 接着放") : "") + (moov ? "，" + (moov.mkv ? "MKV 头" : "moov") + "有缓存" : "") + (opts.audio || pref.audio ? "，音轨 " + (opts.audio || pref.audio) : ""));
-        if (startAt && !again) { toast(T("从 {0} 接着放", fmtTime(startAt))); }
+        if (!web) {
+            R((again ? "换音轨重开「" : "播放「") + Diag.priv(it.title) + "」" + fmtSize(it.size) + " " + fmtTime(it.duration) + (it.asFile ? "（文件 " + Diag.priv(it.fileName || it.mime) + "）" : "") +
+              (startAt ? "，从 " + fmtTime(startAt) + (again ? "" : " 接着放") : "") + (moov ? "，" + (moov.mkv ? "MKV 头" : "moov") + "有缓存" : "") + (opts.audio || pref.audio ? "，音轨 " + (opts.audio || pref.audio) : ""));
+            if (startAt && !again) { toast(T("从 {0} 接着放", fmtTime(startAt))); }
+        } else if (moov) { R("moov 有缓存"); }
         var t0 = performance.now();
-        player.open(TG.source(it), {
+        player.open(src, {
             startAt: startAt,
             exact: again,
             moov: moov,
             audio: opts.audio || pref.audio,
-            onMoov: function (m) { Store.putMoov(it.fileKey, m); },
+            onMoov: function (m) { Store.putMoov(mkey, m); },
             onTracks: function (tr) { if (S.playing === it) { gotTracks(it, tr); } },
             onSub: function (key, pts, dur, data, extra) {
                 var e = S.subs && S.subs.it === it && S.subs.emb[key];
@@ -1075,18 +1091,36 @@
         subTimer = setInterval(function () { if (S.subR) { S.subR.tick(video.currentTime); } }, 100);
     }
 
+    /* 网页链接。解析出来是 MP4 的不交给电视自己的播放器（video.src）：三星的播放器放 archive.org 的 MP4，一部出画面两秒后
+     * video error 2、一部直接 video error 4（2026-10-26 电视实测；桌面 Chrome 上都好好的）。走和 Telegram 的片子同一个播放引擎、
+     * 按段读；服务器不认按段读（Range）的才退回 video.src。HLS 照旧给 hls.js。 */
     function playWeb(it, startAt) {
         if (S.playing !== it) { return; }
-        player = webPlayer;
         R("播放网页「" + Diag.priv(it.title) + "」" + Diag.priv(it.url) + (startAt ? "，从 " + fmtTime(startAt) + " 接着放" : ""));
         if (startAt) { toast(T("从 {0} 接着放", fmtTime(startAt))); }
-        var t0 = performance.now(), opening = player.open(it, { startAt: startAt });
-        spin(true, T("正在解析网页…"));      // open 里报的 loading 会写成「正在打开…」，这里盖掉
-        opening.then(function () {
-            if (S.playing !== it) { return; }
-            R("出画面 " + Math.round(performance.now() - t0) + "ms");
-            spin(false);
-            hideOverlaySoon();
+        spin(true, T("正在解析网页…"));
+        var t0 = performance.now();
+        Web.resolve(it.url).then(function (r) {
+            if (S.playing !== it || r.type !== "mp4") { return r; }
+            R("解析 " + Math.round(r.ms) + "ms（" + r.how + "）→ mp4 " + Diag.priv(Web.host(r.url)));
+            return Web.httpSource(r.url, r.size).then(function (src) {
+                if (S.playing !== it) { return null; }
+                R("MP4 走播放引擎：" + fmtSize(src.size) + "，探 " + src.probeMs + "ms" + (src.redirected ? "，跳到 " + Diag.priv(Web.host(src.redirected)) : "") + (src.sizeFrom ? "，大小取自" + src.sizeFrom : ""));
+                openMse(it, src, startAt, {}, false);
+                return null;
+            }, function (e) {
+                R("MP4 不能按段读（" + errStr(e) + "），交给 video.src");
+                return r;
+            });
+        }).then(function (r) {
+            if (!r || S.playing !== it) { return; }
+            player = webPlayer;
+            return player.open(it, { startAt: startAt, resolved: r }).then(function () {
+                if (S.playing !== it) { return; }
+                R("出画面 " + Math.round(performance.now() - t0) + "ms");
+                spin(false);
+                hideOverlaySoon();
+            });
         }).catch(function (e) {
             if (S.playing === it) { showError(errStr(e)); }
         });
@@ -1140,6 +1174,9 @@
     }
 
     function showError(msg) {
+        /* 一次失败只报一次：播放器先 state("error") 报一次，open() 的 promise 再 reject 一次（2026-10-26 每份诊断日志里都是
+         * 「放不了：90 秒没出画面」紧跟着「放不了：timeout」、出事也记两回）。play() 开头会把 perr 藏起来 */
+        if ($("perr").style.display === "block") { return; }
         spin(false);
         $("perr").innerHTML = T("放不了：{0}", esc(msg || T("未知错误"))) + "<br><span style='color:#8b939b;font-size:28px'>" + T("按返回键回到列表") + "</span>";
         $("perr").style.display = "block";
@@ -1178,7 +1215,8 @@
 
     var LANG = { chi: "中文", zho: "中文", zh: "中文", cmn: "国语", yue: "粤语", eng: "英语", en: "英语", jpn: "日语", ja: "日语",
                  kor: "韩语", ko: "韩语", fre: "法语", fra: "法语", fr: "法语", ger: "德语", deu: "德语", de: "德语", spa: "西班牙语", es: "西班牙语",
-                 ita: "意大利语", it: "意大利语", rus: "俄语", ru: "俄语", tha: "泰语", th: "泰语", por: "葡萄牙语", pt: "葡萄牙语", vie: "越南语", hin: "印地语" };
+                 ita: "意大利语", it: "意大利语", rus: "俄语", ru: "俄语", tha: "泰语", th: "泰语", por: "葡萄牙语", pt: "葡萄牙语", vie: "越南语", hin: "印地语",
+                 dut: "荷兰语", nld: "荷兰语", nl: "荷兰语", pol: "波兰语", pl: "波兰语" };
     function langName(l) {
         l = String(l || "").toLowerCase();
         if (/^zh-?(hans|cn|sg)/.test(l)) { return T("简体中文"); }
@@ -1318,6 +1356,154 @@
         Store.setPrefs(it.fileKey, { audio: key });
         saveProgress();
         play(it, { reopen: true, startAt: t, audio: key });
+    }
+
+    /* ---------- 音乐（music.js；issue #3「Telegram Music」，2026-10-26）----------
+     * 和视频、网页链接混在同一个网格里（只有歌的频道也进来源栏）。点一首：从它开始，按网格里的顺序把这个来源里的歌一首首放下去。
+     * 按返回回到列表时接着放（卡片上标「正在放」），点那张卡片回到这个画面；放视频时停。 */
+
+    var music = Music.create($("au"), { report: function (s) { Log.report("music", s); }, onState: onMusicState, load: loadTrack });
+    S.mu = { item: null, tick: 0, from: "" };
+
+    /* 整首下下来：和放视频同一个数据源（tg.js 的 source，按块取、文件引用过期会重取），不限速。
+     * FLAC 电视解不了：一块块交给 flac.js 的后台线程，边下边解，下完等它解完、拼成 WAV */
+    function isFlac(it) { return it.ext === "flac" || /flac/i.test(it.mime || ""); }
+    async function loadTrack(it, onProgress, signal) {
+        var st = TG.source(it).stream(0, signal, function () { return Promise.resolve(); }), parts = [], got = 0, r, w = isFlac(it) ? Flac.worker() : null;
+        try {
+            while (!(r = await st.iter.next()).done) {
+                got += r.value.length;
+                if (w) { w.push(r.value); } else { parts.push(r.value); }
+                onProgress(got, it.size, "download");
+            }
+            if (!w) { return new Blob(parts, { type: it.mime || "" }); }
+            onProgress(got, it.size, "decode");
+            var t0 = performance.now(), wav = await w.end();
+            Log.report("music", "FLAC 下完之后又等解码 " + Math.round(performance.now() - t0) + "ms，WAV " + fmtMB(wav.size));
+            return wav;
+        } catch (e) { if (w) { w.stop(); } throw e; }
+    }
+
+    /* 卡片上的专辑图：Telegram 给的缩略图（方的），没有就是歌名卡片。不截帧、不找海报 */
+    function musicArt(it) {
+        return Cover.cached(it).then(function (c) {
+            if (c) { if (c.kind !== "none") { setThumb(it, c); } return; }
+            return TG.thumb(it, 320).then(function (th) {
+                if (!th) { Cover.keepNone(it); return; }
+                setThumb(it, { url: th.url, kind: "art" });
+                Cover.keepThumb(it, th.bytes, "art");
+            });
+        });
+    }
+
+    function playMusic(it, given) {
+        S.screen = "music";
+        $("home").classList.add("hide");
+        $("music").classList.add("on");
+        clearInterval(S.mu.tick);
+        S.mu.tick = setInterval(drawMusicBar, 250);
+        var cur = music.current();
+        if (cur && cur.fileKey === it.fileKey) { drawMusic(); drawMusicBar(); return; }        // 正在放的那首：只是回到这个画面
+        var list = given || S.items.filter(function (x) { return x.kind === "music"; }), i = list.indexOf(it);
+        S.mu.from = S.src && S.src.kind !== "search" ? S.src.title : it.chatTitle;
+        R("放音乐「" + Diag.priv(it.title) + "」" + (it.ext || it.mime) + " " + fmtSize(it.size) + " " + fmtTime(it.duration) + "，这一串 " + list.length + " 首，从第 " + (i + 1) + " 首");
+        music.play(list, i);
+    }
+    function closeMusic() {
+        clearInterval(S.mu.tick);
+        $("music").classList.remove("on");
+        $("home").classList.remove("hide");
+        S.screen = "home";
+        var i = S.mu.item ? S.items.findIndex(function (x) { return x.fileKey === S.mu.item.fileKey; }) : -1;
+        if (i >= 0) { S.focus = i; }
+        updateFocus();
+    }
+    function stopMusic(why) {
+        if (!music.current()) { return; }
+        R("音乐停了（" + why + "）");
+        music.stop();
+        var old = S.mu.item;
+        S.mu.item = null;
+        refreshCard(old);
+    }
+    function refreshCard(it) {
+        var i = it ? S.items.findIndex(function (x) { return x.fileKey === it.fileKey; }) : -1, el = i >= 0 && $("c" + i);
+        if (!el) { return; }
+        el.outerHTML = cardHtml(S.items[i], i);
+        if (i === S.focus) { updateFocus(); }
+    }
+
+    function onMusicState(phase, info) {
+        if (phase === "track") {
+            var old = S.mu.item;
+            S.mu.item = info.item;
+            refreshCard(old);
+            refreshCard(info.item);
+            drawMusic();
+            return;
+        }
+        var st = $("mu-state"), l = music.list();
+        st.classList.toggle("err", phase === "error");
+        if (phase === "loading") {
+            st.textContent = info.stage === "decode" ? T("正在解码 FLAC…") : info.total ? T("正在下载 {0} / {1}", fmtMB(info.got), fmtMB(info.total)) : T("正在下载…");
+        }
+        else if (phase === "playing") { st.textContent = ""; }
+        else if (phase === "paused") { st.textContent = T("已暂停"); }
+        else if (phase === "error") {
+            st.textContent = T("放不了：{0}", info.msg) + (music.index() + 1 < l.length ? T("，3 秒后放下一首") : "");
+            Diag.incident("放不了音乐：" + info.msg);
+        } else if (phase === "done") {
+            st.textContent = T("这一串放完了");
+            if (S.screen !== "music") { toast(T("音乐放完了")); }
+        }
+    }
+    function fmtMB(n) { return (n / 1048576).toFixed(1) + " MB"; }
+
+    function drawMusic() {
+        var it = S.mu.item;
+        if (!it) { return; }
+        $("mu-title").textContent = it.title;
+        $("mu-artist").textContent = it.performer || "";
+        $("mu-from").textContent = [S.mu.from, (it.ext || "").toUpperCase(), it.size ? fmtSize(it.size) : ""].filter(Boolean).join(" · ");
+        var l = music.list(), nx = l[music.index() + 1];
+        $("mu-next").textContent = nx ? T("下一首：{0}", nx.title + (nx.performer ? " — " + nx.performer : "")) : "";
+        $("mu-ph").setAttribute("style", phStyle(it.title));
+        $("mu-ph-t").textContent = it.title;
+        var img = $("mu-img");
+        img.classList.remove("on");
+        $("mu-bg").style.backgroundImage = "";
+        function show(url) {
+            if (S.mu.item !== it || !url) { return; }
+            img.src = url;
+            img.classList.add("on");
+            posterBg(url).then(function (bg) { if (bg && S.mu.item === it) { $("mu-bg").style.backgroundImage = "url(" + bg + ")"; } });
+        }
+        /* 卡片上那张先顶上，再换一张大的（这个画面上 560 宽） */
+        var c = S.thumbs[it.fileKey];
+        if (c && c.url) { show(c.url); }
+        TG.thumb(it, 640).then(function (th) { if (th) { show(th.url); } }).catch(function () {});
+    }
+    function drawMusicBar() {
+        var t = music.time(), d = music.duration() || (S.mu.item && S.mu.item.duration) || 0, f = d ? Math.min(1, t / d) : 0;
+        $("mu-fill").style.width = (f * 100).toFixed(2) + "%";
+        $("mu-dot").style.left = (f * 100).toFixed(2) + "%";
+        $("mu-time").textContent = fmtTime(t) + " / " + fmtTime(d);
+    }
+
+    /* 确认 暂停 / 接着放；←→ 10 秒；↑↓ 上一首 / 下一首（遥控器的上一曲 / 下一曲键也是）；返回 回列表（接着放）；停止键 停 */
+    function musicKey(k) {
+        if (k === 10009) { closeMusic(); return; }
+        if (k === 413) { stopMusic("停止键"); closeMusic(); return; }
+        /* 在卡片上按确认进来的：那一下的自动重复还落在这里，等松开过一次才认（见 enterDown） */
+        if (k === 13 && !S.enterArmed) { return; }
+        if (k === 13 || k === 10252 || k === 415 || k === 19) {
+            if ((k === 415 && !music.paused()) || (k === 19 && music.paused())) { return; }
+            music.toggle();
+        }
+        else if (k === 37 || k === 412) { music.seek(music.time() - 10); drawMusicBar(); }
+        else if (k === 39 || k === 417) { music.seek(music.time() + 10); drawMusicBar(); }
+        else if (k === 38 || k === 10232) { if (!music.prev()) { toast(T("已经是第一首")); } }
+        else if (k === 40 || k === 10233) { if (!music.next()) { toast(T("已经是最后一首")); } }
     }
 
     /* ---------- 菜单（播放时长按确认键）---------- */
@@ -1667,11 +1853,16 @@
         if (S.screen === "opts") { optsKey(k); e.preventDefault(); return; }
         if (S.screen === "home") { homeKey(k); e.preventDefault(); }
         else if (S.screen === "player") { playerKey(k); e.preventDefault(); }
+        else if (S.screen === "music") { musicKey(k); e.preventDefault(); }
     });
 
     /* 从别的应用切回来：刷新当前来源（手机上刚转发的片子出现在最前面） */
     document.addEventListener("visibilitychange", function () {
-        if (document.hidden) { if (S.screen === "player") { saveProgress(); video.pause(); } return; }
+        if (document.hidden) {
+            if (S.screen === "player") { saveProgress(); video.pause(); }
+            if (music.current() && !music.paused()) { music.toggle(); }      // 切到别的应用：歌也停（电视的声音归那个应用了）
+            return;
+        }
         refreshSources(true);
         if (S.screen === "home" && S.src) {
             var keep = S.items[S.focus] && S.items[S.focus].fileKey;
@@ -1683,7 +1874,9 @@
     });
 
     /* 给自测（js/selftest.js）读的 */
-    window.__app = { screen: function () { return S.screen; }, openOpts: openOpts };
+    window.__app = { screen: function () { return S.screen; }, openOpts: openOpts, play: play,      // selftest.js 用
+                     music: function () { return { item: S.mu.item, index: music.index(), count: music.list().length, time: music.time(), paused: music.paused() }; },
+                     playMusic: function (list, i) { playMusic(list[i], list); }, stopMusic: function () { stopMusic("自测"); } };
 
     boot().catch(function (e) {
         /* 扫码页按返回、换账号都是 reload：卸载时 mtcute 销毁 port，等着的 signInQr 跟着断。那不是出事，以前每次都记成「启动出错」、报一次出事 */

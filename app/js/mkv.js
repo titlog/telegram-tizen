@@ -332,6 +332,7 @@ var Mkv = (function () {
         var id = t.codecId, cp = t.codecPrivate;
         if (t.kind === "video") {
             if (id === "V_MPEG4/ISO/AVC" && cp && cp.length > 6) {
+                t.levelFix = Mp4.fixAvcLevel(cp, t.width, t.height);       // 级别写小了改够（见 mp4.js），原地改 CodecPrivate
                 t.config = cp; t.codec = Mp4.avcString("avc1", cp);
                 t.stsd = visual("avc1", t, Mp4.box("avcC", cp));
             } else if (id === "V_MPEGH/ISO/HEVC" && cp && cp.length > 22) {
@@ -385,6 +386,7 @@ var Mkv = (function () {
                 else { t.unsupported = tx("音频格式 {0} 放不了", "ACM 0x" + tag.toString(16)); }
             }
             else if (/^A_DTS/.test(id)) { t.unsupported = tx("DTS 音轨电视放不了"); }
+            else if (id === "A_ALAC") { t.unsupported = tx("Apple 无损（ALAC）音频电视解不了"); }
             else if (id === "A_TRUEHD" || id === "A_MLP") { t.unsupported = tx("TrueHD 音轨电视放不了"); }
             else if (id === "A_VORBIS") { t.unsupported = tx("Vorbis 音轨放不了"); }
             else if (/^A_PCM/.test(id)) { t.unsupported = tx("PCM 音轨放不了"); }

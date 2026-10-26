@@ -109,9 +109,20 @@ var Player = (function () {
             if (onState) { try { onState(phase, msg); } catch (e) {} }
         }
 
+        /* 音轨放不放得了。FLAC：电视的 MSE 说认（isTypeSupported 是 true），数据也进得去，可从来不解 —— readyState 停在 1，
+         * 只有音频、配了视频都一样（2026-10-26 deploy.sh --music 实测；AAC 同样的放法没事）。MKV 里 FLAC 音轨的片子以前会一直卡在
+         * 「正在打开」：当它放不了，有别的音轨换别的，没有就无声放、提示一下。桌面 Chrome 解得了，照常放 */
+        function audioOk(t) {
+            if (t.codec === "flac" && /Tizen/.test(navigator.userAgent)) { t.tvNo = tx("FLAC 音轨电视解不了"); return false; }
+            return MediaSource.isTypeSupported(t.mime);
+        }
+
         /* ---------- SourceBuffer 队列 ---------- */
 
         function pumpSb(T) {
+            /* 换了片子、重开过的旧会话：它的 T.wait / T.retry 计时器还会来，SourceBuffer 已经从 MediaSource 上摘了（2026-10-26 一台
+             * 印度电视的日志：「SourceBuffer … removed from the parent media source」） */
+            if (!S || S.tracks.indexOf(T) < 0) { return; }
             /* "ended" 也照样 append：取完整部片 endOfStream 之后往回跳，appendBuffer 会自己把它改回 open */
             if (!T.sb || T.sb.updating || !T.q.length || !S || S.ms.readyState === "closed") { return; }
             var op = T.q[0];
@@ -299,14 +310,33 @@ var Player = (function () {
                     sess.startTo = t0;
                     if (sess.cleared) { video.currentTime = t0; }      // 旧缓冲还没清完的话，清完那一下会挪过去
                 }
+                if (sess.alignV === undefined) { sess.alignV = (out.video[0].dts + (out.video[0].cto || 0)) / V.tr.timescale; }
                 Array.prototype.push.apply(V.pend, out.video);
                 cutFrames(V);
             }
-            if (A && out.audio && out.audio.length) { Array.prototype.push.apply(A.pend, out.audio); }
+            if (A && out.audio && out.audio.length) {
+                if (sess.alignA === undefined) { sess.alignA = out.audio[0].dts / A.tr.timescale; }
+                Array.prototype.push.apply(A.pend, out.audio);
+            }
+            alignStart(sess);
             if (A && A.inited) { cutFrames(A); }
             if (out.subs && out.subs.length && sess.opts.onSub) {
                 out.subs.forEach(function (s) { try { sess.opts.onSub("s:" + s.num, s.pts, s.dur, s.data, { zlib: !!s.zlib }); } catch (e) {} });
             }
+        }
+        /* 从 Cue 跳进来，第一帧音频可能比视频关键帧晚：mkvmerge 把跨过关键帧的那帧音频放在上一个 Cluster 里，这边拆出来的第一帧音频
+         * 晚 0.006–0.12 秒。播放头放在关键帧上就落在音视频之间的空档里（buffered 是两条轨的交集）—— 三星的 MSE 不会自己跨过去：
+         * 2026-10-26 一台印度电视续播 mkvmerge 封装的 MKV 六次都是 90 秒没画面，播放中跳转也每次先卡 1–2.5 秒等「跳过空档」。
+         * 两条轨的第一帧都拿到了，起点挪到晚的那个。 */
+        function alignStart(sess) {
+            if (!sess.alignPending || sess.alignV === undefined || (sess.tracks[1] && sess.alignA === undefined)) { return; }
+            sess.alignPending = false;
+            var t = Math.max(sess.alignV, sess.alignA || 0);
+            if (sess.startTo === undefined || t <= sess.startTo + 0.001) { return; }
+            R("音频比视频晚 " + Math.round((t - sess.startTo) * 1000) + "ms 开始，起点挪到 " + t.toFixed(3));
+            sess.startTo = t;
+            if (sess.seekAt) { sess.seekAt.to = t; }
+            if (sess.cleared) { video.currentTime = t; }       // 旧缓冲还没清完的话，清完那一下会挪过去
         }
         /* 和 MP4 那条路一样：窗口里拆出多少就拼多少（每段最多 1 秒），不等凑满一秒 —— 等的话跳转后第一段要多下一秒的字节，
          * 桌面测试里跳转 1.4–2.0 秒 → 见 CLAUDE.md */
@@ -507,9 +537,9 @@ var Player = (function () {
             if (!v) { throw new Error(notes.join(tx("；")) || tx("没有视频轨")); }
             /* 音轨：tkhd 里 enabled 的那条是默认（多音轨的 MP4 只开一条） */
             sess.audios = mv.tracks.filter(function (tr) { return tr.kind === "audio"; }).map(function (tr) {
-                var ok = !tr.unsupported && MediaSource.isTypeSupported(tr.mime);
+                var ok = !tr.unsupported && audioOk(tr);
                 return { key: "a:" + tr.id, tr: tr, lang: tr.lang, name: tr.name, codec: tr.codec, channels: tr.channels, ok: ok,
-                         why: ok ? "" : tr.unsupported ? tx(tr.unsupported) : tx("{0} 电视放不了", tr.codec), isDefault: tr.enabled };
+                         why: ok ? "" : tr.unsupported ? tx(tr.unsupported) : tr.tvNo || tx("{0} 电视放不了", tr.codec), isDefault: tr.enabled };
             });
             var pick = pickAudio(sess.audios, opts.audio), a = pick ? pick.tr : null;
             sess.audioKey = pick ? pick.key : "";
@@ -530,7 +560,7 @@ var Player = (function () {
               v.codec + " " + v.width + "x" + v.height + " " + v.n + " 帧 " + (v.keys ? v.keys.length : v.n) + " 关键帧 / " +
               (a ? a.codec + " " + a.channels + "ch " + a.rate + "Hz" : "无音频") + (sess.audios.length > 1 ? "（" + sess.audios.length + " 条音轨，用 " + sess.audioKey + "）" : "") +
               (sess.subT.length ? "，字幕轨 " + sess.subT.map(function (s) { return s.tr.codec + (s.tr.lang ? "/" + s.tr.lang : ""); }).join(" ") : "") +
-              "，" + Math.round(mv.duration / 60) + " 分" + (notes.length ? " | " + notes.join("；") : ""));
+              "，" + Math.round(mv.duration / 60) + " 分" + levelNote(v) + (notes.length ? " | " + notes.join("；") : ""));
             if (notes.length) { state("note", notes.join(tx("；"))); }
             subsUpfront(sess);
             if (a) {
@@ -633,6 +663,8 @@ var Player = (function () {
             R(why + " → " + t.toFixed(1) + "s" + (exact > t ? "（停在 " + exact.toFixed(1) + "s）" : "") + "，" + where.join("，") + " 读");
         }
 
+        function levelNote(v) { var f = v && v.levelFix; return f ? "，H.264 级别 " + f.from + " → " + f.to + "（一帧 " + f.mbs + " 个宏块，原来那级不够）" : ""; }
+
         /* ---------- MKV 的打开、跳转 ---------- */
 
         function setupMkv(sess, info, ms, cached, opts) {
@@ -646,9 +678,9 @@ var Player = (function () {
             });
             if (!v) { throw new Error(notes.join(tx("；")) || tx("没有视频轨")); }
             sess.audios = info.tracks.filter(function (t) { return t.kind === "audio"; }).map(function (t) {
-                var ok = !t.unsupported && !!t.mime && MediaSource.isTypeSupported(t.mime);
+                var ok = !t.unsupported && !!t.mime && audioOk(t);
                 return { key: "a:" + t.num, mk: t, lang: t.lang, name: t.name, codec: t.codec || t.codecId, channels: t.channels, ok: ok,
-                         why: ok ? "" : t.unsupported ? tx(t.unsupported) : tx("{0} 电视放不了", t.codec || t.codecId), isDefault: t.isDefault };
+                         why: ok ? "" : t.unsupported ? tx(t.unsupported) : t.tvNo || tx("{0} 电视放不了", t.codec || t.codecId), isDefault: t.isDefault };
             });
             var pick = pickAudio(sess.audios, opts.audio), a = pick ? pick.mk : null;
             sess.audioKey = pick ? pick.key : "";
@@ -672,7 +704,7 @@ var Player = (function () {
             R("MKV 头" + (cached ? "（缓存）" : "") + " " + sess.moovMs + "ms 到手（读头和 Cues " + ms + "ms" + (info.reads ? "，" + info.reads + " 次请求" : "") + "）：" + v.codec + " " + v.width + "x" + v.height + " / " +
               (a ? a.codec + " " + a.channels + "ch " + a.rate + "Hz" : "无音频") + (sess.audios.length > 1 ? "（" + sess.audios.length + " 条音轨，用 " + sess.audioKey + "）" : "") +
               (sess.subsInfo.length ? "，字幕轨 " + sess.subsInfo.map(function (t) { return t.codecId + (t.lang ? "/" + t.lang : ""); }).join(" ") : "") +
-              "，" + Math.round(info.duration / 60) + " 分，Cues " + (info.cues ? info.cues.t.length + " 个" : "没有") +
+              "，" + Math.round(info.duration / 60) + " 分，Cues " + (info.cues ? info.cues.t.length + " 个" : "没有") + levelNote(v) +
               (notes.length ? " | " + notes.join("；") : ""));
             if (notes.length) { state("note", notes.join(tx("；"))); }
             if (startAt > 1) { repositionMkv(sess, cueOrGuess(sess, startAt, 0), "续播", opts.exact ? startAt : 0); }
@@ -690,6 +722,8 @@ var Player = (function () {
             sess.dmxDone = false;
             sess.tracks.forEach(function (T) { T.pend = []; T.front = c.t; });
             sess.needStart = !!c.resync;
+            sess.alignPending = !c.resync && !(exact > c.t);       // 按码率猜的位置有 needStart；停在指定那一秒（换音轨）的不挪
+            sess.alignV = sess.alignA = undefined;
             clearAll(sess, c.resync ? -1 : c.t, why, exact);
             if (c.resync) { sess.seekAt.to = c.t; }
             lane.onChunk = function () { produce(lane); };
@@ -709,6 +743,16 @@ var Player = (function () {
                     started = true;
                     video.play().catch(function (e) { R("play() " + errStr(e)); });
                 }
+                /* 开头的空档：两条轨的缓冲（交集）从播放头后面一点才开始，readyState 到不了 2、永远不出画面（三星的 MSE 不跨空档；
+                 * 播放中的 monitor 会跳，这时还没有 monitor）。交集攒够半秒再跳，一次跳到它开头 */
+                if (!started && sess.cleared && video.readyState < 2) {
+                    var b = video.buffered, ct = video.currentTime;
+                    if (b.length && b.start(0) > ct + 0.001 && b.start(0) - ct < 6 && b.end(0) - b.start(0) > 0.5) {
+                        R("开头空档 " + ct.toFixed(3) + " → " + b.start(0).toFixed(3) + "，跳过去（各轨 " + api.debug() + "）");
+                        if (sess.seekAt) { sess.seekAt.to = b.start(0); }
+                        video.currentTime = b.start(0) + 0.001;
+                    }
+                }
                 var base = sess.seekAt ? sess.seekAt.to : 0;
                 if (started && !video.paused && video.currentTime > base + 0.04 && video.currentTime < base + 5) {
                     clearInterval(tick);
@@ -724,7 +768,10 @@ var Player = (function () {
                     clearInterval(tick);
                     /* 放弃了就别再取：2026-10-23 放弃之后下载还在每 10 秒重试一次，直到观众离开这个视频。 */
                     sess.lanes.forEach(stopLane);
-                    R("90 秒没出画面，放弃");
+                    /* 放弃时把现场都写下来：电视上没有调试器，下一次只能靠这一行（2026-10-26 印度那台的日志里只有一句「放弃」） */
+                    R("90 秒没出画面，放弃：readyState " + video.readyState + "，" + (video.paused ? "暂停" : "在放") + "，t=" + video.currentTime.toFixed(3) +
+                      "，各轨 " + api.debug() + "，收了 " + mb(sess.bytes) + "，最后一个字节 " + Math.round((performance.now() - (sess.lastByteAt || sess.t0)) / 1000) + " 秒前，" +
+                      "队列 " + sess.tracks.map(function (T) { return T.tr.kind + " " + T.q.length + " 段"; }).join(" / ") + (sess.fmt === "mkv" ? "，起点 " + sess.startTo : ""));
                     state("error", tx("90 秒没出画面"));
                     reject(new Error("timeout"));
                 }
@@ -736,6 +783,7 @@ var Player = (function () {
         api.seek = function (sec, dir) {
             var sess = S;
             if (!sess || !sess.ready) { return; }
+            sess.endSent = false;
             sec = Math.max(0, Math.min(sec, sess.duration - 3));
             var b = video.buffered, fr = frontier(), i;
             if (sess.fmt === "mkv") {
@@ -810,7 +858,15 @@ var Player = (function () {
                 if (!video.paused && !video.ended) {
                     if (t === lastT) {
                         if (!stuckAt) { stuckAt = now; }
-                        if (now - stuckAt > 1000) { state("buffering"); }
+                        if (now - stuckAt > 1000 && !sess.endSent) { state("buffering"); }
+                        /* 整部片都取完了、离结尾不到一秒却不动：MKV 最后一帧视频比音频早结束几十毫秒，endOfStream 之后桌面 Chrome 停在
+                         * 视频最后一帧上、ended 一直不来（2026-10-26 桌面引擎测试，MKV 一部部都是「播完=false」，MP4 没事）。
+                         * 不当放完，「下一集」就等不来。 */
+                        if (sess.done && !sess.endSent && now - stuckAt > 1500 && sess.duration - t < 1) {
+                            sess.endSent = true;
+                            R("结尾停在 " + t.toFixed(2) + "（时长 " + sess.duration.toFixed(2) + "，各轨 " + api.debug() + "），当放完了");
+                            state("ended");
+                        }
                         /* 卡住 20 秒、这段时间一个字节都没来 → 从当前位置重开读取 */
                         if (now - stuckAt > 20000 && now - sess.lastByteAt > 20000) {
                             R("卡了 20 秒、字节也停了，从 " + t.toFixed(1) + "s 重开");
@@ -834,7 +890,7 @@ var Player = (function () {
                     lastBytes = sess.bytes;
                 }
             }, 20);
-            video.onended = function () { if (S === sess) { state("ended"); } };
+            video.onended = function () { if (S === sess && !sess.endSent) { sess.endSent = true; state("ended"); } };
         }
 
         /* ---------- 其他 ---------- */

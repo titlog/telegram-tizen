@@ -4,13 +4,15 @@
  * widget 能读跨域框的文档（抖音项目 2026-09-29 设备实测）。框里的页面会跑广告、可能自动放视频，所以找到就拆掉。
  *
  * 链接本身就是 .m3u8 / .mp4 的，不用规则，直接放。别的站要一条站点规则，用 Web.register(规则) 加进来 ——
- * 仓库里一条都不带，写在 js/sites.local.js 里（不进仓库，部署时照样打进包里）：
+ * 仓库里只带 archive.org 一条（js/sites.js，随更新下发）；别的写在 js/sites.local.js 里（不进仓库，部署时照样打进包里）：
  *
  *   Web.register({
  *       name: "example",                         // 卡片上「网页 · 站名」
  *       host: /(^|\.)example\.com$/i,             // 哪个站
- *       path: /^\/video\/[^/]+/,                  // 哪些地址是片子页
+ *       path: /^\/video\/[^/]+/,                  // 哪些地址是片子页（对得上的比「.mp4 结尾就是直链」优先）
  *       normalize: function (u) {},              // 可选：规整地址（u 是 URL 对象，原地改）
+ *       title: function (t) { … },                // 可选：整理 Telegram 预览、页面给的标题（去掉站名之类）
+ *       resolve: async function (u, H) { … },     // 可选：有公开接口的站直接问接口，不取页面 → {url, note, size}
  *       fromHtml: function (html) { … },          // 从页面 HTML 里找视频地址（.m3u8 或 .mp4），找不到返回 null
  *       fromWin: function (w) { … },              // 可选：从隐藏框里的 window 读（页面用脚本拼地址时）
  *       // 下面是列表（群里发一个列表页的链接，左边来源栏多一项，右边是它的片子），都可选：
@@ -28,7 +30,8 @@
  * H 是给规则用的工具：get / post / getRetry / postRetry（Cloudflare 挡了隔一会儿再试）/ cloudflare / durSec / normalize / playable。
  *
  *   Web.playable(url)                   这个链接进不进网格
- *   Web.resolve(url)                    → Promise<{url, type: "hls"|"mp4", how, ms}>
+ *   Web.resolve(url)                    → Promise<{url, type: "hls"|"mp4", how, ms, size?}>
+ *   Web.httpSource(mp4 地址, 大小?)       → Promise<数据源>：MP4 给播放引擎（player.js）按段读，和 tg.js 的数据源一个样；不认 Range 就失败
  *   Web.meta(url)                       → Promise<{title, image}>（页面的 og:title / og:image，卡片用；存在电视上）
  *   Web.player(video, report, onState)  和 Player 一样的接口：open(item, {startAt}) / seek / toggle / close / time / duration
  *   Web.listable(url) / Web.listTitle(url, 预览标题)
@@ -51,14 +54,24 @@ var Web = (function () {
     function parse(url) { try { return new URL(url); } catch (e) { return null; } }
     function host(url) { var u = parse(url); return u ? u.hostname : ""; }
 
+    /* 规则的 path 对得上的排在直链前面：archive.org 的 /details/<编号>/<文件名>.mp4 是网页，不是文件 */
     function siteOf(url) {
-        var u = parse(url);
+        var u = parse(url), i;
         if (!u || !/^https?:$/.test(u.protocol)) { return null; }
+        for (i = 0; i < SITES.length; i++) {
+            if (SITES[i].path && SITES[i].host.test(u.hostname) && SITES[i].path.test(u.pathname)) { return SITES[i]; }
+        }
         if (DIRECT.test(u.pathname)) { return { name: "direct" }; }
-        for (var i = 0; i < SITES.length; i++) {
-            if (SITES[i].host.test(u.hostname) && (!SITES[i].path || SITES[i].path.test(u.pathname))) { return SITES[i]; }
+        for (i = 0; i < SITES.length; i++) {
+            if (!SITES[i].path && SITES[i].host.test(u.hostname)) { return SITES[i]; }
         }
         return null;
+    }
+    /* 卡片上的片名：Telegram 预览、页面给的标题多半带着站名 */
+    function titleOf(url, t) {
+        var s = siteOf(url);
+        t = String(t || "");
+        return (s && s.title ? s.title(t) : t.split(/\s[-|｜–]\s/)[0]).trim();
     }
     function listOf(url) {
         var u = parse(url);
@@ -121,6 +134,10 @@ var Web = (function () {
         var s = siteOf(url), t0 = performance.now(), notes = [];
         if (!s) { throw new Error(tx("不认识这个网站：{0}", host(url))); }
         if (s.name === "direct") { return { url: url, type: typeOf(url), how: "直链", ms: 0 }; }
+        if (s.resolve) {
+            var a = await s.resolve(new URL(url), H);
+            return { url: a.url, type: typeOf(a.url), size: a.size || 0, how: "接口" + (a.note ? " " + a.note : ""), ms: performance.now() - t0 };
+        }
         try {
             var r = await get(url, 15000), found = r.status === 200 ? s.fromHtml(r.text) : null;
             if (found) {
@@ -129,7 +146,7 @@ var Web = (function () {
             }
             notes.push("XHR " + r.status + (cloudflare(r.text) ? " " + tx("Cloudflare 挡了") : r.status === 200 ? " " + tx("页面里没有地址") : ""));
         } catch (e) { notes.push("XHR " + errStr(e)); }
-        var fr = await viaFrame(url, function (w) { return s.fromWin(w) || s.fromHtml(w.document.documentElement.innerHTML); }, 25000);
+        var fr = await viaFrame(url, function (w) { return (s.fromWin && s.fromWin(w)) || s.fromHtml(w.document.documentElement.innerHTML); }, 25000);
         notes.push(tx("框：{0}", fr.note));
         if (fr.url) {
             var u = new URL(fr.url, url).href;
@@ -276,6 +293,7 @@ var Web = (function () {
             out = fr.url;
             if (!out) { throw new Error(tx("取不到页面信息（{0}；框：{1}）", why, fr.note)); }
         }
+        if (out.title && siteOf(url).title) { out.title = titleOf(url, out.title); }
         m[url] = out;
         var keys = Object.keys(m);
         if (keys.length > 200) { keys.sort(function (a, b) { return m[a].at - m[b].at; }).slice(0, keys.length - 200).forEach(function (k) { delete m[k]; }); }
@@ -430,7 +448,7 @@ var Web = (function () {
                 sess.resolve = res;
                 sess.reject = rej;
                 sess.timer = setTimeout(function () { fail(sess, tx("40 秒没出画面")); }, 40000);
-                resolve(item.url).then(function (r) {
+                (opts && opts.resolved ? Promise.resolve(opts.resolved) : resolve(item.url)).then(function (r) {
                     if (S !== sess) { return; }
                     R("解析 " + Math.round(r.ms) + "ms（" + r.how + "）→ " + r.type + " " + Diag.priv(host(r.url)));
                     start(sess, r.url, r.type, sess.startAt);
@@ -459,6 +477,53 @@ var Web = (function () {
         return api;
     }
 
+    /* ---------- MP4 给播放引擎读 ---------- */
+
+    /* 网页链接里的 MP4 不交给电视自己的播放器（见 app.js 的 playWeb），给 player.js 读：和 tg.js 的数据源一样的接口
+     * {size, stream(offset, signal, throttle) → {start, iter}}。先要一个字节，探出大小（Content-Range；探不到用 sizeHint，
+     * archive.org 的接口里有）和跳转之后的地址 —— archive.org 的下载地址 302 到存储节点，之后直接找节点，每次跳转省一个来回；
+     * 节点那边不行了再回原地址。读：从 offset 所在的那块起一个请求读到尾，切成 Player.CH 一块，每块交出去之前等 throttle
+     * （背压：播放器够了就停在那，TCP 跟着停）。 */
+    async function httpSource(url, sizeHint) {
+        var t0 = performance.now(), ac = new AbortController(), timer = setTimeout(function () { ac.abort(); }, 15000), r;
+        try { r = await fetch(url, { headers: { Range: "bytes=0-0" }, signal: ac.signal }); }
+        catch (e) { throw new Error(ac.signal.aborted ? tx("{0} 秒没回", 15) : errStr(e)); }
+        finally { clearTimeout(timer); }
+        if (r.status !== 206) { throw new Error("HTTP " + r.status); }
+        var m = /\/(\d+)\s*$/.exec(r.headers.get("content-range") || ""), size = m ? +m[1] : +sizeHint || 0;
+        if (!size) { throw new Error(tx("不知道文件多大")); }
+        var at = r.url || url, CH = Player.CH;
+        return {
+            size: size, probeMs: Math.round(performance.now() - t0), redirected: at !== url ? at : "", sizeFrom: m ? "" : "接口",
+            stream: function (offset, signal, throttle) {
+                var start = Math.floor(offset / CH) * CH;
+                async function* gen() {
+                    var res = null;
+                    try { res = await fetch(at, { headers: { Range: "bytes=" + start + "-" }, signal: signal }); } catch (e) { if (signal.aborted || at === url) { throw e; } }
+                    if ((!res || res.status !== 206) && at !== url && !signal.aborted) {
+                        at = url;
+                        res = await fetch(at, { headers: { Range: "bytes=" + start + "-" }, signal: signal });
+                    }
+                    if (res.status !== 206) { throw new Error("HTTP " + res.status); }
+                    var rd = res.body.getReader(), buf = new Uint8Array(CH), n = 0;
+                    for (;;) {
+                        var x = await rd.read();
+                        if (x.done) { break; }
+                        for (var i = 0; i < x.value.length;) {
+                            var take = Math.min(CH - n, x.value.length - i);
+                            buf.set(x.value.subarray(i, i + take), n);
+                            n += take;
+                            i += take;
+                            if (n === CH) { await throttle(); yield buf; buf = new Uint8Array(CH); n = 0; }
+                        }
+                    }
+                    if (n) { await throttle(); yield buf.subarray(0, n); }
+                }
+                return { start: start, iter: gen() };
+            }
+        };
+    }
+
     /* 去掉 #…，再按站点规整（见各站的 normalize） */
     function normalize(url) {
         var s = siteOf(url), u = parse(url);
@@ -472,9 +537,9 @@ var Web = (function () {
         register: register,
         playable: function (url) { return !!siteOf(url); },
         listable: function (url) { return !siteOf(url) && !!listOf(url); },
-        list: list, login: login, listTitle: listTitle,
+        list: list, login: login, listTitle: listTitle, title: titleOf,
         normalize: normalize,
         site: function (url) { var s = siteOf(url); return s ? (s.name === "direct" ? host(url) : s.name) : ""; },
-        resolve: resolve, meta: meta, cachedMeta: cachedMeta, player: player
+        resolve: resolve, meta: meta, cachedMeta: cachedMeta, player: player, httpSource: httpSource, host: host
     };
 })();

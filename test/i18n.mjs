@@ -24,7 +24,7 @@ for (const f of fs.readdirSync(ROOT + 'app/js').filter(f => f.endsWith('.js') &&
 const html = fs.readFileSync(ROOT + 'app/index.html', 'utf8');
 for (const m of html.matchAll(/<(\w+)[^>]*\bdata-i18n\b[^>]*>([\s\S]*?)<\/\1>/g)) used.set(m[2].trim(), 'index.html');
 /* 3. 运行时拼的 */
-for (const k of ['中文', '国语', '粤语', '英语', '日语', '韩语', '法语', '德语', '西班牙语', '意大利语', '俄语', '泰语', '葡萄牙语', '越南语', '印地语',
+for (const k of ['中文', '国语', '粤语', '英语', '日语', '韩语', '法语', '德语', '西班牙语', '意大利语', '俄语', '泰语', '葡萄牙语', '越南语', '印地语', '荷兰语', '波兰语',
   '简体', '繁体', '英文', '中英', '杜比 AC-3', '杜比 E-AC-3', '连接', 'TG 视频']) used.set(k, '运行时');
 for (const [k, f] of used) {
   if (!keys.has(k)) fail(`${f}：没有英文「${k}」`);

@@ -172,7 +172,7 @@ var I18n = (function () {
         /* ---------- 音轨、字幕、菜单 ---------- */
         "中文": "Chinese", "国语": "Mandarin", "粤语": "Cantonese", "英语": "English", "日语": "Japanese", "韩语": "Korean",
         "法语": "French", "德语": "German", "西班牙语": "Spanish", "意大利语": "Italian", "俄语": "Russian", "泰语": "Thai",
-        "葡萄牙语": "Portuguese", "越南语": "Vietnamese", "印地语": "Hindi", "简体中文": "Chinese (Simplified)", "繁体中文": "Chinese (Traditional)",
+        "葡萄牙语": "Portuguese", "越南语": "Vietnamese", "印地语": "Hindi", "荷兰语": "Dutch", "波兰语": "Polish", "简体中文": "Chinese (Simplified)", "繁体中文": "Chinese (Traditional)",
         "简体": "Simplified Chinese", "繁体": "Traditional Chinese", "英文": "English", "中英": "Chinese + English",
         "杜比 AC-3": "Dolby AC-3", "杜比 E-AC-3": "Dolby E-AC-3",
         "单声道": "Mono", "立体声": "Stereo", "{0} 声道": "{0} ch",
@@ -223,6 +223,8 @@ var I18n = (function () {
         "压缩过的音频轨放不了": "Compressed audio tracks can't be played",
         "视频格式 {0} 放不了": "Video format {0} isn't supported",
         "音频格式 {0} 放不了": "Audio format {0} isn't supported",
+        "Apple 无损（ALAC）音频电视解不了": "The TV can't decode Apple Lossless (ALAC) audio",
+        "FLAC 音轨电视解不了": "The TV can't decode FLAC audio tracks",
         "字幕格式 {0} 放不了": "Subtitle format {0} isn't supported",
         "未知": "unknown",
         "DTS 音轨电视放不了": "The TV can't play DTS audio",
@@ -257,7 +259,32 @@ var I18n = (function () {
         "登录没有结果": "Sign-in returned nothing",
         "取不到页面信息（{0}；框：{1}）": "Couldn't read the page ({0}; frame: {1})",
         "这台电视上 hls.js 用不了（没有 MSE？）": "hls.js doesn't work on this TV (no MSE?)",
-        "40 秒没出画面": "No picture after 40 seconds"
+        "40 秒没出画面": "No picture after 40 seconds",
+        "不知道文件多大": "The server didn't say how big the file is",
+
+        /* ---------- 音乐（music.js、app.js） ---------- */
+        "音乐": "Music",
+        "♪ 正在放": "♪ Playing",
+        "共 {0} 个视频和音乐": "{0} videos and tracks",
+        "正在下载 {0} / {1}": "Downloading {0} / {1}",
+        "正在下载…": "Downloading…",
+        "正在解码 FLAC…": "Decoding FLAC…",
+        "，3 秒后放下一首": " — playing the next one in 3 seconds",
+        "这一串放完了": "That's the end of the list",
+        "音乐放完了": "Music finished",
+        "下一首：{0}": "Next: {0}",
+        "已经是第一首": "This is the first track",
+        "已经是最后一首": "This is the last track",
+        "{0} 秒没放起来": "Didn't start within {0} seconds",
+        "下载出错：{0}": "Download failed: {0}",
+        "确认 暂停 · ←→ 快进快退 · ↑↓ 上一首 / 下一首 · 返回 回列表（接着放）": "OK pause · ←→ seek · ↑↓ previous / next track · Back to the list (keeps playing)",
+
+        /* ---------- 仓库里带的站点规则（sites.js） ---------- */
+        "archive.org 回 {0}": "archive.org returned {0}",
+        "这个条目在 archive.org 上已经下架了": "This item has been taken down from archive.org",
+        "archive.org 上没有这个条目": "No such item on archive.org",
+        "这是 archive.org 上的一个合集，不是一部片子": "That's an archive.org collection, not a single film",
+        "这个条目里没有能放的 MP4": "No playable MP4 in this archive.org item"
     };
 
     function fill(s, args, from) { return String(s).replace(/\{(\d)\}/g, function (m, i) { var v = args[+i + from]; return v === undefined ? m : v; }); }

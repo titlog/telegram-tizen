@@ -9,6 +9,8 @@ var TG = (function () {
     var VIDEO = { _: "inputMessagesFilterVideo" };
     var DOCS = { _: "inputMessagesFilterDocument" };
     var URLS = { _: "inputMessagesFilterUrl" };
+    /* 音乐（issue #3「Telegram Music」，2026-10-26）：Telegram 的「音乐」筛的是带歌名 / 歌手属性的音频文件，语音消息不在里面 */
+    var MUSIC = { _: "inputMessagesFilterMusic" };
     /* 当文件发的视频：MKV 几乎都是这么发的，MP4 选「不压缩」发也是。它们在 Telegram 的「文件」里，「视频」筛不出来
      * （手机上能放，是因为手机客户端认扩展名）。avi / rmvb / ts 之类电视放不了，不列。 */
     var VIDEO_EXT = /\.(mkv|webm|mp4|m4v|mov)$/i, VIDEO_MIME = /^video\/(x-matroska|webm|mp4|quicktime|x-m4v)$/i;
@@ -107,25 +109,30 @@ var TG = (function () {
     }
 
     function isVideoMsg(m) { var d = m.media; return !!d && d.type === "video" && !d.isRound && !d.isAnimation; }
+    function isMusic(m) { return !!m.media && m.media.type === "audio"; }
     function isVideoDoc(m) {
         var d = m.media;
         return !!d && d.type === "document" && (VIDEO_EXT.test(d.fileName || "") || VIDEO_MIME.test(d.mimeType || ""));
     }
 
-    /* 这个来源里有几个视频（只问数量，limit 1）。一个「视频」都没有的，再看最近 40 个文件里有没有当文件发的（只有 MKV 的群） */
+    /* 这个来源里有几个视频（只问数量，limit 1）。一个「视频」都没有的，再看最近 40 个文件里有没有当文件发的（只有 MKV 的群），
+     * 再没有就问音乐（只有歌的频道也进来源栏） */
     async function videoCount(sourceId) {
         var res = await again(function () { return client.searchMessages({ chatId: sourceId, filter: VIDEO, limit: 1 }); });
         var n = res.total || res.length;
         if (n) { return n; }
         var docs = await again(function () { return client.searchMessages({ chatId: sourceId, filter: DOCS, limit: 40 }); });
         docs.forEach(noteSub);
-        return docs.filter(isVideoDoc).length;
+        n = docs.filter(isVideoDoc).length;
+        if (n) { return n; }
+        var mu = await again(function () { return client.searchMessages({ chatId: sourceId, filter: MUSIC, limit: 1 }); });
+        return mu.total || mu.length;
     }
 
-    /* 「视频」和「文件」两路按时间合并成一串，新的在前。cursor 由 app 存着、原样传回来（page.next）。
+    /* 「视频」「文件」「音乐」几路按时间合并成一串，新的在前。cursor 由 app 存着、原样传回来（page.next）。
      * 文件那一路里大多不是视频（PDF、压缩包、字幕…）：翻到的字幕文件顺手记下来（subtitlesFor 用）。
-     * 两路各自一页一页往前翻；文件那一路暂时没有视频时，要翻到比视频那一路的下一个更早的时间，才能确定先出哪个
-     * （每次最多多翻 4 页，翻不到就先按手上的出，顺序可能差一点）。 */
+     * 各路各自一页一页往前翻；第一路以外的哪一路暂时手上没有，要翻到比已有的最新那个更早的时间，才能确定先出哪个
+     * （每页最多多翻 4 页 × 路数，翻不到就先按手上的出，顺序可能差一点）。 */
     function run(fetch, keep) { return { fetch: fetch, keep: keep, next: undefined, buf: [], end: false, minDate: Infinity, total: 0, kept: 0 }; }
     async function pull(r) {
         var res = await again(function () { return r.fetch(r.next); });
@@ -139,34 +146,40 @@ var TG = (function () {
         if (!res.length || res.next === undefined) { r.end = true; }
     }
     async function merged(c, limit) {
-        var v = c.v, d = c.d, out = [], extra = 0;
-        if (!c.started) { c.started = true; await Promise.all([pull(v), pull(d)]); }
+        var rs = c.runs, v = rs[0], out = [], extra = 0;
+        if (!c.started) { c.started = true; await Promise.all(rs.map(pull)); }
         while (out.length < limit) {
             if (!v.buf.length && !v.end) { await pull(v); continue; }
-            var a = v.buf[0], b = d.buf[0];
-            if (!b && !d.end && (!a || a.date.getTime() < d.minDate) && extra < 4) { extra++; await pull(d); continue; }
-            if (!a && !b) { break; }
-            out.push((a && (!b || a.date >= b.date) ? v : d).buf.shift());
+            var best = null;
+            rs.forEach(function (r) { if (r.buf[0] && (!best || r.buf[0].date > best.buf[0].date)) { best = r; } });
+            var newest = best ? best.buf[0].date.getTime() : -Infinity;
+            var lag = rs.filter(function (r) { return r !== v && !r.buf.length && !r.end && newest < r.minDate; })[0];
+            if (lag && extra < 4 * (rs.length - 1)) { extra++; await pull(lag); continue; }
+            if (!best) { break; }
+            out.push(best.buf.shift());
         }
-        var more = v.buf.length || d.buf.length || !v.end || !d.end;
-        return { items: out, next: more ? c : undefined, total: v.total + d.kept };
+        var more = rs.some(function (r) { return r.buf.length || !r.end; });
+        /* 第一路（视频）报的是总数；文件那一路大多不是视频，按留下的算 */
+        return { items: out, next: more ? c : undefined, total: rs.reduce(function (n, r, i) { return n + (i === 1 ? r.kept : r.total); }, 0) };
     }
 
     /* 一个来源里的视频，新的在前。page.next 传回来取下一页。 */
     function videos(sourceId, cursor, limit) {
-        var c = cursor || {
-            v: run(function (next) { return client.searchMessages({ chatId: sourceId, filter: VIDEO, limit: 40, offset: next }); }, isVideoMsg),
-            d: run(function (next) { return client.searchMessages({ chatId: sourceId, filter: DOCS, limit: 40, offset: next }); }, isVideoDoc)
-        };
+        var c = cursor || { runs: [
+            run(function (next) { return client.searchMessages({ chatId: sourceId, filter: VIDEO, limit: 40, offset: next }); }, isVideoMsg),
+            run(function (next) { return client.searchMessages({ chatId: sourceId, filter: DOCS, limit: 40, offset: next }); }, isVideoDoc),
+            run(function (next) { return client.searchMessages({ chatId: sourceId, filter: MUSIC, limit: 40, offset: next }); }, isMusic)
+        ] };
         return merged(c, limit || 40);
     }
 
     /* 搜索（所有会话里的视频，加上文件名对得上的视频文件）。用法同 videos */
     function search(query, cursor, limit) {
-        var c = cursor || {
-            v: run(function (next) { return client.searchGlobal({ query: query, filter: VIDEO, limit: 40, offset: next }); }, isVideoMsg),
-            d: run(function (next) { return client.searchGlobal({ query: query, filter: DOCS, limit: 40, offset: next }); }, isVideoDoc)
-        };
+        var c = cursor || { runs: [
+            run(function (next) { return client.searchGlobal({ query: query, filter: VIDEO, limit: 40, offset: next }); }, isVideoMsg),
+            run(function (next) { return client.searchGlobal({ query: query, filter: DOCS, limit: 40, offset: next }); }, isVideoDoc),
+            run(function (next) { return client.searchGlobal({ query: query, filter: MUSIC, limit: 40, offset: next }); }, isMusic)
+        ] };
         return merged(c, limit || 40);
     }
 
@@ -261,7 +274,7 @@ var TG = (function () {
         var w = m.media && m.media.type === "webpage" ? m.media.preview : null;
         var bare = new URL(url).hostname.replace(/^www\./, "");
         /* 只有站名（预览没拿到片子页的标题）也不算 */
-        var wt = w && w.title && !/just a moment|attention required/i.test(w.title) && w.title.trim().toLowerCase() !== bare ? w.title.split(/\s[-|｜–]\s/)[0] : "";
+        var wt = w && w.title && !/just a moment|attention required/i.test(w.title) && w.title.trim().toLowerCase() !== bare ? Web.title(url, w.title) : "";
         var meta = Web.cachedMeta(url);
         var host = new URL(url).hostname.replace(/^www\./, "");
         return {
@@ -336,6 +349,7 @@ var TG = (function () {
 
     function describe(m) {
         var d = m.media;
+        if (d.type === "audio") { return describeMusic(m); }
         return {
             key: m.chat.id + ":" + m.id,           // 续播、本地记录用
             fileKey: d.uniqueFileId,                // 同一个文件转发到不同地方也一样
@@ -354,6 +368,32 @@ var TG = (function () {
             date: m.date,
             hasCover: !!d.videoCover,
             info: captionInfo(m.text || "")
+        };
+    }
+
+    /* 一首歌：歌名、歌手从音频属性里来（频道的说明文字多半是推广），没有就用文件名。封面是 Telegram 给的专辑图（缩略图） */
+    function describeMusic(m) {
+        var d = m.media, fn = d.fileName || "", ext = (/\.([a-z0-9]{2,4})$/i.exec(fn) || [])[1] || (/audio\/(?:x-)?([a-z0-9]+)/i.exec(d.mimeType || "") || [])[1] || "";
+        return {
+            kind: "music",
+            key: m.chat.id + ":" + m.id,
+            fileKey: d.uniqueFileId,
+            msg: m,
+            doc: d,
+            asFile: false,
+            chatTitle: (m.chat && (m.chat.title || m.chat.displayName)) || "",
+            title: (d.title || "").trim() || fn.replace(/\.[a-z0-9]{2,4}$/i, "").replace(/_/g, " ").trim() || tx("音乐"),
+            performer: (d.performer || "").trim(),
+            fileName: fn,
+            ext: ext.toLowerCase().replace(/^mpeg$/, "mp3"),
+            caption: m.text || "",
+            size: d.fileSize || 0,
+            duration: d.duration || 0,
+            width: 0, height: 0,
+            mime: d.mimeType || "",
+            date: m.date,
+            hasCover: false,
+            info: { year: "", rating: "", director: "" }
         };
     }
 
@@ -393,7 +433,7 @@ var TG = (function () {
             try { for await (var c of it) { yield c; } }
             catch (e) {
                 /* 连接作废：先重连，再抛出去让播放器重试（重试时用的是新的 client） */
-                if (remake && gone(e)) { await reconnect(); throw e; }
+                if (remake && gone(e) && !leaving) { await reconnect(); throw e; }      // 页面正在卸载（换账号、重新加载）就不重连了
                 if (/FILE_REFERENCE|File ref/i.test(String(e && (e.message || e.text)))) {
                     var ms = await again(function () { return client.getMessages(item.msg.chat.id, [item.msg.id]); });
                     if (ms && ms[0] && ms[0].media) { item.msg = ms[0]; item.doc = ms[0].media; }

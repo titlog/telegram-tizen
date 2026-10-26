@@ -42,6 +42,22 @@
   <div id="upnext"><div class="h" data-i18n>接着放下一集</div><div class="t" id="upnext-t"></div><div class="k" id="upnext-k"></div></div>
 </div>
 
+<!-- 音乐（music.js 放，这里只是画面）：封面、歌名、进度；按返回回列表时接着放 -->
+<div id="music">
+  <div id="mu-bg"></div>
+  <div id="mu-art"><div class="ph" id="mu-ph"><span id="mu-ph-t"></span></div><img id="mu-img"></div>
+  <div id="mu-meta">
+    <div id="mu-title"></div>
+    <div id="mu-artist"></div>
+    <div id="mu-from"></div>
+    <div id="mu-state"></div>
+    <div id="mu-next"></div>
+  </div>
+  <div id="mu-bar"><div id="mu-fill"></div><div id="mu-dot"></div></div>
+  <div id="mu-row"><span id="mu-time"></span><span id="mu-keys" data-i18n>确认 暂停 · ←→ 快进快退 · ↑↓ 上一首 / 下一首 · 返回 回列表（接着放）</span></div>
+</div>
+<audio id="au"></audio>
+
 <!-- 登录 -->
 <div id="panel">
   <div id="how">

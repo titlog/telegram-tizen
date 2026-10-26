@@ -1,7 +1,8 @@
 /* 网页链接那条路（app/js/web.js）在桌面上跑一遍：解析页面 → hls.js 放 → 跳转，打印 web.js 自己报的那些行。
  * 走真网络、真网站。页面从 file:// 开、关掉跨域检查 —— 和电视上 widget 的处境一样（电视上不受 CORS 约束）。
  *   node test/web.mjs <网页链接> [跳到第几秒=4800]
- *   站点规则读本机的 app/js/sites.local.js（不进仓库）；链接本身是 .m3u8 / .mp4 的不用规则。
+ *   站点规则：仓库里的 app/js/sites.js（archive.org）+ 本机的 app/js/sites.local.js（不进仓库）；链接本身是 .m3u8 / .mp4 的不用规则。
+ *   node test/web.mjs https://archive.org/details/his_girl_friday 3000
  *   NOXHR=1 node test/web.mjs …   把对页面的 XHR 都回成 Cloudflare 的 403，走隐藏框那条路。桌面 Chrome 怎么开关都不让 file:// 页面读
  *                                 跨域框（电视上能读），所以这时测试页伪装成那个站自己的一个地址，框和它同源。 */
 import os from 'node:os';
@@ -17,7 +18,8 @@ if (!url) { console.log('用法：node test/web.mjs <网页链接> [跳到第几
 const local = fs.existsSync(ROOT + 'app/js/sites.local.js') ? `<script src="file://${ROOT}app/js/sites.local.js"></script>` : '';
 const dir = fs.mkdtempSync(os.tmpdir() + '/tgweb-');
 fs.writeFileSync(dir + '/t.html', `<!doctype html><meta charset=utf-8><body><video id=v muted style="width:320px"></video>
-<script src="file://${ROOT}app/js/vendor/hls.min.js"></script><script src="file://${ROOT}app/js/web.js"></script>${local}
+<script>var Diag = { priv: function (s) { return s; } };</script>
+<script src="file://${ROOT}app/js/vendor/hls.min.js"></script><script src="file://${ROOT}app/js/web.js"></script><script src="file://${ROOT}app/js/sites.js"></script>${local}
 <script>
 window.LINES = []; var t0 = performance.now();
 function L(s) { LINES.push(Math.round(performance.now() - t0) + "ms " + s); }
@@ -44,8 +46,8 @@ let pageUrl = 'file://' + dir + '/t.html';
 if (process.env.NOXHR) {
   pageUrl = new URL('/__tg_test.html', url).href;
   await page.route(pageUrl, r => r.fulfill({ contentType: 'text/html', body: fs.readFileSync(dir + '/t.html', 'utf8')
-    .replace(/file:\/\/[^"]+\/(hls\.min|web)\.js/g, (m, n) => '/__tg_' + n + '.js') }));
-  for (const [n, f] of [['hls.min', 'app/js/vendor/hls.min.js'], ['web', 'app/js/web.js']])
+    .replace(/file:\/\/[^"]+\/(hls\.min|web|sites)\.js/g, (m, n) => '/__tg_' + n + '.js') }));
+  for (const [n, f] of [['hls.min', 'app/js/vendor/hls.min.js'], ['web', 'app/js/web.js'], ['sites', 'app/js/sites.js']])
     await page.route(new URL('/__tg_' + n + '.js', url).href, r => r.fulfill({ contentType: 'text/javascript', body: fs.readFileSync(ROOT + f, 'utf8') }));
 }
 await page.goto(pageUrl);

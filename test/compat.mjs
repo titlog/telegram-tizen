@@ -1,5 +1,6 @@
 /* build/src/compat.js 的离线校验：给它一个 Chromium 76 那样的 AbortController（没有 reason、throwIfAborted、AbortSignal.any），
- * 看补上的三样行为对不对。node 自己全都有，所以在 vm 里换成假的。
+ * 看补上的三样行为对不对；再给一个 Chromium 69（Tizen 5.5）那样的全局（没有 globalThis、Object.fromEntries、queueMicrotask、
+ * TextEncoder.encodeInto、Symbol.description）。node 自己全都有，所以在 vm 里换成假的、删掉。
  *
  *   node test/compat.mjs
  */
@@ -66,4 +67,33 @@ vm.createContext(native);
 vm.runInContext(src, native);
 assert.deepEqual([AbortSignal.any, AbortSignal.prototype.throwIfAborted, AbortController.prototype.abort], before);
 
-console.log("✓ compat.js：reason、throwIfAborted、AbortSignal.any 在 Chromium 76 那样的引擎上补对了，新引擎上不动");
+/* ---------- Chromium 69：globalThis、Object.fromEntries、queueMicrotask、TextEncoder.encodeInto、Symbol.description ---------- */
+const old = vm.createContext({ AbortSignal, AbortController, DOMException, Event, EventTarget, TextDecoder, setTimeout });
+vm.runInContext(`
+  this.self = this;
+  delete Object.fromEntries;
+  delete Symbol.prototype.description;
+  class TextEncoder { encode(s) { return new Uint8Array(Buffer.from(s, "utf8")); } }
+  this.TextEncoder = TextEncoder;
+`.replace("Buffer.from(s, \"utf8\")", "__enc(s)"), Object.assign(old, { __enc: (s) => Buffer.from(s, "utf8") }));
+vm.runInContext("delete globalThis.globalThis; delete this.queueMicrotask;", old);
+assert.equal(vm.runInContext("typeof globalThis", old), "undefined");
+vm.runInContext(src, old, { filename: "compat.js" });
+assert.equal(vm.runInContext("globalThis === self", old), true);
+assert.deepEqual(vm.runInContext("JSON.stringify(Object.fromEntries([['a', 1], ['b', 2]]))", old), '{"a":1,"b":2}');
+assert.equal(vm.runInContext("Symbol('x y').description + '|' + Symbol().description", old), "x y|undefined");
+// encodeInto：放得下全写，read 是 UTF-16 码元数；放不下只写完整的字符
+let r = JSON.parse(vm.runInContext("var d = new Uint8Array(16); JSON.stringify([new TextEncoder().encodeInto('a中😀', d), Array.from(d.subarray(0, 8))])", old));
+assert.deepEqual(r[0], { read: 4, written: 8 });
+assert.deepEqual(r[1], Array.from(Buffer.from("a中😀")));
+r = JSON.parse(vm.runInContext("var d = new Uint8Array(6); JSON.stringify(new TextEncoder().encodeInto('a中😀', d))", old));
+assert.deepEqual(r, { read: 2, written: 4 });
+// queueMicrotask：比 setTimeout 先、按顺序
+const order = [];
+old.__push = (x) => order.push(x);
+vm.runInContext("setTimeout(() => __push('timeout')); queueMicrotask(() => __push(1)); queueMicrotask(() => __push(2));", old);
+await new Promise((ok) => setTimeout(ok, 20));
+assert.deepEqual(order, [1, 2, "timeout"]);
+
+console.log("✓ compat.js：reason、throwIfAborted、AbortSignal.any 在 Chromium 76 那样的引擎上补对了；globalThis、fromEntries、queueMicrotask、" +
+  "encodeInto、Symbol.description 在 Chromium 69 那样的引擎上补对了；新引擎上不动");

@@ -80,11 +80,31 @@ var Mp4 = (function () {
 
     function hex2(n) { return (n < 16 ? "0" : "") + n.toString(16); }
 
-    function avcCodec(b, entry, t) {
+    function avcCodec(b, entry, t, tr) {
         var c = child(b, { p: entry.p + 78, e: entry.e }, "avcC");
         if (!c) { return t; }
+        tr.levelFix = fixAvcLevel(b.subarray(c.p, c.e), tr.width, tr.height);      // 原地改，后面切出来的 stsd 就是改过的
         entry.config = b.slice(c.p, c.e);           // WebCodecs 解单帧要的 description
         return avcString(t, entry.config);
+    }
+
+    /* H.264 写的级别比画面小：2026-10-25 一台 Tizen 6.0 放一部 576x1280 60fps 的竖屏片，文件里写的是 Level 1.3（那一级一帧最多
+     * 396 个宏块，这片一帧 2880 个），出画面之前就 Player error code=3。桌面 Chrome 软解不看级别，三星的硬件解码器多半按级别分配资源。
+     * 帧大小超出写的级别时，把 avcC 和里面 SPS 的 level_idc 改成够用的一级（按 60fps 算；写高了解码器无所谓）。原地改 c（avcC 正文），
+     * 返回 {from, to, mbs}；没改返回 null。[level_idc, 一帧最多宏块, 每秒最多宏块]，H.264 附录 A 表 A-1 */
+    var AVC_LEVELS = [[10, 99, 1485], [11, 396, 3000], [12, 396, 6000], [13, 396, 11880], [20, 396, 11880], [21, 792, 19800], [22, 1620, 20250],
+        [30, 1620, 40500], [31, 3600, 108000], [32, 5120, 216000], [40, 8192, 245760], [41, 8192, 245760], [42, 8704, 522240],
+        [50, 22080, 589824], [51, 36864, 983040], [52, 36864, 2073600]];
+    function fixAvcLevel(c, w, h) {
+        if (!c || c.length < 12 || !w || !h) { return null; }
+        var mbs = Math.ceil(w / 16) * Math.ceil(h / 16), have = c[3], cur = null;
+        AVC_LEVELS.forEach(function (l) { if (l[0] === have) { cur = l; } });
+        if (!cur || mbs <= cur[1]) { return null; }        // 不认识的级别不动
+        var want = AVC_LEVELS.filter(function (l) { return l[1] >= mbs && l[2] >= mbs * 60; })[0] || AVC_LEVELS[AVC_LEVELS.length - 1];
+        c[3] = want[0];
+        /* 第一个 SPS：avcC 第 6 字节起是 2 字节长度 + NAL（头 0x67、profile_idc、约束位、level_idc） */
+        if ((c[5] & 0x1f) && (c[8] & 0x1f) === 7) { c[11] = want[0]; }
+        return { from: have / 10, to: want[0] / 10, mbs: mbs };
     }
     /* avcC 的正文（AVCDecoderConfigurationRecord）→ codecs 字符串。mkv.js 也用（MKV 的 CodecPrivate 就是它） */
     function avcString(t, c) { return t + "." + hex2(c[1]) + hex2(c[2]) + hex2(c[3]); }
@@ -143,7 +163,7 @@ var Mp4 = (function () {
         if (tr.kind === "video") {
             tr.width = u16(b, entry.p + 24);
             tr.height = u16(b, entry.p + 26);
-            if (t === "avc1" || t === "avc3") { tr.codec = avcCodec(b, entry, t); }
+            if (t === "avc1" || t === "avc3") { tr.codec = avcCodec(b, entry, t, tr); }
             else if (t === "hvc1" || t === "hev1") { tr.codec = hevcCodec(b, entry, t); }
             else if (t === "av01") { tr.codec = "av01.0.08M.08"; }
             else { tr.codec = t; tr.unsupported = tx("视频格式 {0} 放不了", t); }
@@ -158,6 +178,7 @@ var Mp4 = (function () {
             else if (t === "ac-3" || t === "ec-3") { tr.codec = t; }
             else if (t === "Opus") { tr.codec = "opus"; }
             else if (t === "fLaC") { tr.codec = "flac"; }
+            else if (t === "alac") { tr.codec = t; tr.unsupported = tx("Apple 无损（ALAC）音频电视解不了"); }
             else { tr.codec = t; tr.unsupported = tx("音频格式 {0} 放不了", t); }
             tr.mime = "audio/mp4; codecs=\"" + tr.codec + "\"";
         } else {
@@ -509,6 +530,6 @@ var Mp4 = (function () {
         scanTop: scanTop, parseMoov: parseMoov, initSegment: initSegment, fragment: fragment, fragmentFrames: fragmentFrames, afterLeading: afterLeading,
         sampleAt: sampleAt, keyAtOrBefore: keyAtOrBefore, keyNear: keyNear, pts: pts,
         /* 给 mkv.js 拼 stsd 用的：写盒子的小工具、codecs 字符串 */
-        W: W, box: box, full: full, raw: raw, concat: concat, hex2: hex2, avcString: avcString, hevcString: hevcString
+        W: W, box: box, full: full, raw: raw, concat: concat, hex2: hex2, avcString: avcString, hevcString: hevcString, fixAvcLevel: fixAvcLevel
     };
 })();

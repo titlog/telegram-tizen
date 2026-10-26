@@ -1,14 +1,29 @@
-/* README 的截图：假的 Telegram 层（来源、视频都是编的，片子是 Blender 的开源电影），不碰任何真账号、真群。
- * 本机的 js/sites.local.js 换成空的，config.js 换成假凭证 —— 截图里不会出现本机写的站点规则。
+/* README 的截图：假的 Telegram 层（来源、群里的消息都是编的），不碰任何真账号、真群、真网站。片子都能合法转发：
+ * Blender Foundation / Blender Studio 的开源电影（CC BY）、archive.org 上公有领域 / CC0 的老电影。
+ * 本机的 js/sites.local.js 换成空的，config.js 换成假凭证 —— 截图里不会出现本机写的站点规则；archive.org 那条是仓库里的 sites.js。
  * 要先准备（都在 test/media/，不进仓库）：
  *   curl -o test/media/sintel_trailer-1080p.mp4 https://download.blender.org/durian/trailer/sintel_trailer-1080p.mp4
  *   ffmpeg -ss 33 -i test/media/sintel_trailer-1080p.mp4 -frames:v 1 -vf crop=1920:818:0:130,scale=640:-2 test/media/thumbs/sintel_33.jpg   # 裁掉上下黑边
- * 其余几部的封面是从 Wikimedia Commons 上的正片里取的一帧（下面 films 里的文件名和秒数），一次一帧、中间歇几秒 ——
+ * Blender 其余几部的封面是从 Wikimedia Commons 上的正片里取的一帧（下面 films 里的文件名和秒数），一次一帧、中间歇几秒 ——
  * 并发的范围请求它回 429：
  *   ffmpeg -ss 200 -i https://upload.wikimedia.org/wikipedia/commons/c/c0/Big_Buck_Bunny_4K.webm \
  *          -frames:v 1 -vf scale=640:-2,format=yuvj420p test/media/thumbs/bbb_200.jpg
- * 然后：RATE=0 LAT=0 node test/serve.mjs & node test/readme-shots.mjs   → docs/screenshots/*.jpg（1600×900，macOS 的 sips 转）
- * 片子都是 Blender Foundation / Blender Studio 的，CC BY（2.5–4.0，各片见 films）。 */
+ * archive.org 那几部同样取一帧（links 里的地址 + 秒数，片子文件见各条注释）：
+ *   ffmpeg -ss 1150 -i https://archive.org/download/Sita_Sings_the_Blues/Sita_Sings_the_Blues_720p.mp4 \
+ *          -frames:v 1 -vf scale=640:-2,format=yuvj420p test/media/thumbs/ia_sita_1150.jpg
+ * Sintel 正片：官方的 MKV（H.264 1080p + AC-3 5.1 + 10 条内嵌字幕）截一分钟。音频转成 AAC —— 桌面 Chrome 的 MSE 不认 AC-3（电视认）。
+ * 视频原样拷贝时从 104 秒前面那个关键帧（98.958 秒）开始，音频要从同一处单独转，不然开头 5 秒没有声音、音视频缓冲的交集
+ * 从 5 秒起，播放头停在 0 走不动（第一次就这么截的）：
+ *   S=https://download.blender.org/durian/movies/Sintel.2010.1080p.mkv; cd test/media/readme
+ *   ffmpeg -ss 104 -i $S -t 62 -map 0:v -map 0:s -c copy v.mkv && ffmpeg -ss 98.958 -i $S -t 67.2 -map 0:a:0 -c:a aac -ac 2 -b:a 192k a.mka
+ *   ffmpeg -i v.mkv -i a.mka -map 0:v -map 1:a -map 0:s -c copy -metadata:s:a:0 title= -metadata:s:a:0 language=eng sintel_part.mkv
+ * 中文是官方另外给的外挂字幕（GBK），按截出来那段的起点（98.958 秒 = 内嵌英文字幕和它前两句的差）挪过时间、还是 GBK：
+ *   https://download.blender.org/durian/subs/sintel_chs.srt → 每条减 98.958 秒 → test/media/readme/Sintel.2010.1080p.chs.srt
+ * 网页链接那张：Sita Sings the Blues 的 1080p 原片截 45 秒，重新编码；archive.org 的接口和下载都在这里拦下来答（见 IA）。
+ * 不能 -c copy：从中间截出来的视频带 3.3 秒的预滚（编辑列表盖住）、音频从 -1 秒起，播放引擎不出画面（见 CLAUDE.md）：
+ *   ffmpeg -ss 1688 -i https://archive.org/download/Sita_Sings_the_Blues/Sita_Sings_the_Blues_1080p.mp4 -t 45 -map 0:v:0 -map 0:a:0 \
+ *          -c:v libx264 -preset veryfast -crf 20 -c:a aac -b:a 160k -movflags +faststart test/media/readme/sita_1080p_part.mp4
+ * 然后：RATE=0 LAT=0 node test/serve.mjs & node test/readme-shots.mjs   → docs/screenshots/*.jpg（1600×900，macOS 的 sips 转） */
 import fs from 'node:fs';
 import os from 'node:os';
 import { createRequire } from 'node:module';
@@ -18,38 +33,53 @@ const { chromium } = require('playwright-core');
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const OUT = ROOT + 'docs/screenshots/';
-/* UILANG=en：英文界面的那一套（docs/screenshots/en-*.jpg，README.en.md 用），片名、群名也换成英文 */
+/* UILANG=en：英文界面的那一套（docs/screenshots/en-*.jpg，README.md 用 —— GitHub 默认展示的是英文版；中文版 README.zh.md 用不带 en- 的），片名、群名也换成英文 */
 const EN = process.env.UILANG === 'en', PRE = EN ? 'en-' : '';
 fs.mkdirSync(OUT, { recursive: true });
-const sintel = ROOT + 'test/media/sintel_trailer-1080p.mp4';
-if (!fs.existsSync(sintel)) { console.log('先下载 Sintel 预告片，见文件开头'); process.exit(1); }
+const SINTEL = 'readme/sintel_part.mkv', SITA = 'readme/sita_1080p_part.mp4', CHS = 'readme/Sintel.2010.1080p.chs.srt';
+for (const f of [SINTEL, SITA, CHS]) {
+  if (!fs.existsSync(ROOT + 'test/media/' + f)) { console.log('缺 test/media/' + f + '，见文件开头'); process.exit(1); }
+}
 
-/* 第一条是真能放的 Sintel 预告片；其余几部只有封面（片子文件不存在，截图里不点开）。都短于 40 分钟，不去找海报。
- * [标题, 时长秒, 封面（test/media/thumbs/ 下）, 能放的文件]；注释是作者、协议、封面取自 Commons 上的哪个文件： */
+/* 群里发的视频和文件。第一条是真能放的 Sintel 正片（卡片上写正片的大小、时长，放的是截的那一分钟）；其余只有封面（截图里不点开）。
+ * [标题, 时长秒, 封面（test/media/thumbs/ 下）, 第几天前发的]；注释是作者、协议、封面取自 Commons 上的哪个文件： */
 const day = 86400000;
 const films = [
-  ['Sintel 预告片', 52, 'sintel_33', 'sintel'],            // © Blender Foundation | durian.blender.org，CC BY 3.0；download.blender.org/durian/trailer
-  ['Big Buck Bunny 大雄兔', 635, 'bbb_200'],                // © Blender Foundation | peach.blender.org，CC BY 3.0；c/c0/Big_Buck_Bunny_4K.webm
-  ['Elephants Dream 大象之梦', 658, 'ed_120'],              // © Blender Foundation / Netherlands Media Art Institute，CC BY 2.5；2/28/Elephants_Dream_(2006)_1080p24.webm
-  ['Tears of Steel 钢之泪', 734, 'tos_250'],                // © Blender Foundation | mango.blender.org，CC BY 3.0；c/cb/Tears_of_Steel_1080p.webm
-  ['Spring 春天', 464, 'spring_70'],                        // © Blender Foundation（Andy Goralczyk），CC BY 4.0；a/a5/Spring_-_Blender_Open_Movie.webm
-  ['Sprite Fright', 630, 'sprite_90'],                      // © Blender Studio，CC BY 4.0；7/76/Sprite_Fright_-_Blender_Open_Movie-full_movie.webm
-  ['Charge', 263, 'charge_110'],                            // © Blender Studio，CC BY 4.0；7/7a/Charge_-_Blender_Open_Movie-full_movie.webm
-  ['Coffee Run', 185, 'coffee_25'],                         // © Blender Foundation，CC BY 4.0；3/3f/Coffee_Run_-_Blender_Open_Movie-full_movie.webm
-  ['Caminandes 3: Llamigos', 150, 'cami_55']];              // © Blender Institute（Pablo Vazquez），CC BY 3.0；a/ab/Caminandes_3_-_Llamigos_-_Blender_Animated_Short.webm
-for (const [, , thumb] of films) {
-  if (!fs.existsSync(ROOT + 'test/media/thumbs/' + thumb + '.jpg')) { console.log('缺封面 test/media/thumbs/' + thumb + '.jpg，见文件开头'); process.exit(1); }
+  ['Sintel 辛特尔', 888, 'sintel_33', 1],                    // © Blender Foundation | durian.blender.org，CC BY 3.0；download.blender.org/durian/movies
+  ['Big Buck Bunny 大雄兔', 635, 'bbb_200', 3],               // © Blender Foundation | peach.blender.org，CC BY 3.0；c/c0/Big_Buck_Bunny_4K.webm
+  ['Tears of Steel 钢之泪', 734, 'tos_250', 5],               // © Blender Foundation | mango.blender.org，CC BY 3.0；c/cb/Tears_of_Steel_1080p.webm
+  ['Spring 春天', 464, 'spring_70', 6],                       // © Blender Foundation（Andy Goralczyk），CC BY 4.0；a/a5/Spring_-_Blender_Open_Movie.webm
+  ['Sprite Fright', 630, 'sprite_90', 8],                     // © Blender Studio，CC BY 4.0；7/76/Sprite_Fright_-_Blender_Open_Movie-full_movie.webm
+  ['Charge', 263, 'charge_110', 9],                           // © Blender Studio，CC BY 4.0；7/7a/Charge_-_Blender_Open_Movie-full_movie.webm
+  ['Elephants Dream 大象之梦', 658, 'ed_120', 10],            // © Blender Foundation / Netherlands Media Art Institute，CC BY 2.5；2/28/Elephants_Dream_(2006)_1080p24.webm
+  ['Coffee Run', 185, 'coffee_25', 11],                       // © Blender Foundation，CC BY 4.0；3/3f/Coffee_Run_-_Blender_Open_Movie-full_movie.webm
+  ['Caminandes 3: Llamigos', 150, 'cami_55', 12]];            // © Blender Institute（Pablo Vazquez），CC BY 3.0；a/ab/Caminandes_3_-_Llamigos_-_Blender_Animated_Short.webm
+/* 群里发的 archive.org 片子页链接（仓库里的 sites.js 认得）：[标题, archive.org 编号, 封面, 第几天前发的] */
+const pages = [
+  ['Sita Sings the Blues 希塔唱蓝调', 'Sita_Sings_the_Blues', 'ia_sita_1150', 2],  // Nina Paley 2008，CC0；Sita_Sings_the_Blues_720p.mp4 第 1150 秒
+  ['The General 将军号（1926）', 'TheGeneral1926', 'ia_general_3300', 4],            // Buster Keaton 1926，公有领域；The_General_1926_720p.mp4 第 3300 秒
+  ['His Girl Friday 女友礼拜五（1940）', 'his_girl_friday', 'ia_hgf_400', 7]];      // Howard Hawks 1940，公有领域（版权没续期）；his_girl_friday.mp4 第 400 秒
+for (const t of [...films, ...pages].map(x => x[2])) {
+  if (!fs.existsSync(ROOT + 'test/media/thumbs/' + t + '.jpg')) { console.log('缺封面 test/media/thumbs/' + t + '.jpg，见文件开头'); process.exit(1); }
 }
-const enTitle = (t) => t === 'Sintel 预告片' ? 'Sintel (trailer)' : t.replace(/\s*[\u4e00-\u9fff].*$/, '');
-const items = films.map(([title, duration, thumb, file], i) => ({
-  key: 'k' + i, fileKey: 'f' + i, file: file || 'missing-' + i, thumb, title: EN ? enTitle(title) : title, duration,
-  size: file ? fs.statSync(sintel).size : Math.round(duration * 1.6 * 1048576 / 10),
-  date: Date.now() - (i * 2 + 1) * day, info: { year: '', rating: '', director: '' } }));
+const enTitle = (t) => t.replace(/\s*[一-鿿].*?(（(\d{4})）)?$/, (m, p, y) => y ? ' (' + y + ')' : '');
+const info = { year: '', rating: '', director: '' };
+const items = films.map(([title, duration, thumb, ago], i) => ({
+  key: 'k' + i, fileKey: 'f' + i, thumb, title: EN ? enTitle(title) : title, duration, date: Date.now() - ago * day, info,
+  ...(i === 0 ? { file: SINTEL, fileName: 'Sintel.2010.1080p.mkv', asFile: true, size: 1180090590, bytes: fs.statSync(ROOT + 'test/media/' + SINTEL).size,
+                  msg: { id: 1, chat: { id: 1 } } }
+              : { file: 'missing-' + i, size: Math.round(duration * 1.6 * 1048576 / 10) }) }));
+const links = pages.map(([title, id, thumb, ago], i) => {
+  const url = 'https://archive.org/details/' + id;
+  return { kind: 'web', key: 'w' + i, fileKey: 'web:' + url, url, site: 'archive.org', doc: {}, thumb, title: EN ? enTitle(title) : title,
+    fileName: '', caption: '', size: 0, duration: 0, width: 0, height: 0, mime: '', date: Date.now() - ago * day, hasCover: false, info };
+});
+const subFiles = { 'Sintel.2010.1080p.mkv': [{ name: 'Sintel.2010.1080p.chs.srt', lang: '简体', size: fs.statSync(ROOT + 'test/media/' + CHS).size, score: 4, doc: { path: '/test/media/' + CHS } }] };
 
 const stub = `
 var TG = (function () {
-  var ITEMS = ${JSON.stringify(items)};
-  ITEMS.forEach(function (it) { it.date = new Date(it.date); });
+  var ITEMS = ${JSON.stringify(items)}, LINKS = ${JSON.stringify(links)}, SUBS = ${JSON.stringify(subFiles)};
+  ITEMS.concat(LINKS).forEach(function (it) { it.date = new Date(it.date); });
   function httpSource(url, size) {
     var CH = Player.CH;
     return { size: size, stream: function (offset, signal, throttle) {
@@ -69,33 +99,60 @@ var TG = (function () {
     init: async function () {}, mode: function () { return "stub"; }, me: async function () { return { id: 1 }; },
     login: async function () {}, logout: async function () {},
     videoCount: async function (src) { return src === "c" ? 0 : 9; },
-    sources: async function () { var en = ${EN}; return [{ id: "a", title: en ? "Open movies" : "开源动画", kind: "channel" }, { id: "b", title: en ? "Forwarded by me" : "我转发的", kind: "group" },
-      { id: "d", title: en ? "Documentaries" : "纪录片", kind: "channel" }, { id: "e", title: en ? "Travel" : "旅行视频", kind: "group" }, { id: "c", title: en ? "Empty group" : "空的群", kind: "group" }]; },
+    sources: async function () { var en = ${EN}; return [{ id: "a", title: en ? "Forwarded by me" : "我转发的", kind: "group" }, { id: "b", title: en ? "Open movies" : "开源动画", kind: "channel" },
+      { id: "d", title: en ? "Classic films" : "老电影", kind: "channel" }, { id: "e", title: en ? "Documentaries" : "纪录片", kind: "channel" }, { id: "c", title: en ? "Empty group" : "空的群", kind: "group" }]; },
     videos: async function () { return { items: ITEMS, next: undefined, total: ITEMS.length }; },
-    links: async function () { return []; },
+    links: async function () { return LINKS; },
     thumb: async function (it) {
       var b = await (await fetch("/test/media/thumbs/" + it.thumb + ".jpg")).arrayBuffer();
       return { url: URL.createObjectURL(new Blob([b], { type: "image/jpeg" })), bytes: b };
     },
-    source: function (it) { return httpSource("/test/media/" + (it.file === "sintel" ? "sintel_trailer-1080p" : it.file) + ".mp4", it.size); },
+    source: function (it) { return httpSource("/test/media/" + it.file, it.bytes || it.size); },
+    subtitlesFor: async function (it) { return SUBS[it.fileName] || []; },
+    download: async function (doc) { return new Uint8Array(await (await fetch(doc.path)).arrayBuffer()); },
     describe: function (x) { return x; }
   };
 })();`;
 
 const browser = await chromium.launch({
   executablePath: os.homedir() + '/Library/Caches/ms-playwright/chromium-1217/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
-  args: ['--autoplay-policy=no-user-gesture-required'],
+  /* 网页链接里的 MP4 由播放引擎 fetch（跨域、带 Range）；电视上 widget 不受 CORS 约束，这里关掉跨域检查 */
+  args: ['--autoplay-policy=no-user-gesture-required', '--disable-web-security'],
 });
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
 page.on('pageerror', e => console.log('  pageerror ' + e.message));
+if (process.env.DEBUG) page.on('console', m => { if (/^(app|player|web|onerror):/.test(m.text())) console.log('  ' + m.text()); });     // DEBUG=1：应用自己写的日志
 await page.route('**/app/js/tg.js', r => r.fulfill({ contentType: 'text/javascript', body: stub }));
 await page.route('**/app/js/sites.local.js', r => r.fulfill({ contentType: 'text/javascript', body: '' }));
 /* 应用自己会往外连的两处：诊断日志的接收端（地址从 diag.js 读）、自动更新查的 GitHub / jsDelivr —— 测试里一律拦掉，不往线上传东西 */
 const OUTSIDE = [new URL(/var ENDPOINT = "([^"]+)"/.exec(fs.readFileSync(ROOT + 'app/js/diag.js', 'utf8'))[1]).host, 'raw.githubusercontent.com', 'cdn.jsdelivr.net'];
 await page.route((u) => OUTSIDE.includes(u.host), (r) => r.abort());
+/* archive.org（IA）：接口答一份照真接口抄的文件表（sites.js 从里面挑 1080p 那份），下载转到本地截的那段；别的请求一律拦掉 */
+const IA = { metadata: { identifier: 'Sita_Sings_the_Blues', mediatype: 'movies' }, files: [
+  { name: 'Sita_Sings_the_Blues_1080p.mp4', source: 'original', format: 'h.264 MPEG4', size: '4428753160', length: '4891.24', width: '1920', height: '1080' },
+  { name: 'Sita_Sings_the_Blues_720p.mp4', source: 'original', format: 'h.264 MPEG4', size: '2594195433', length: '4891.24', width: '1280', height: '720' },
+  { name: 'Sita_Sings_the_Blues.mp4', source: 'derivative', format: 'h.264', size: '507536373', length: '4891.24', width: '638', height: '360' },
+  { name: 'SSTB_1080_FINAL_2009_02.mov', source: 'original', format: 'QuickTime', size: '16289618317', length: '4909.99', width: '1920', height: '1080' }] };
+await page.route((u) => u.host.endsWith('archive.org'), (r) => {
+  const u = new URL(r.request().url());
+  if (u.pathname === '/metadata/Sita_Sings_the_Blues') {
+    return r.fulfill({ contentType: 'application/json', body: JSON.stringify(IA),
+      headers: { 'Access-Control-Allow-Origin': 'http://localhost:8768', 'Access-Control-Allow-Credentials': 'true' } });
+  }
+  if (u.pathname === '/download/Sita_Sings_the_Blues/Sita_Sings_the_Blues_1080p.mp4') {
+    return r.fulfill({ status: 302, headers: { Location: 'http://localhost:8768/test/media/' + SITA } });
+  }
+  return r.abort();
+});
 await page.route('**/app/js/config.js', r => r.fulfill({ contentType: 'text/javascript', body: 'var REPORT_TO=""; var TG_API_ID=1; var TG_API_HASH="x";' }));
 const sleep = (t) => new Promise(r => setTimeout(r, t));
-const key = async (code, n = 1) => { for (let i = 0; i < n; i++) { await page.evaluate(c => document.dispatchEvent(new KeyboardEvent('keydown', { keyCode: c, bubbles: true })), code); await sleep(150); } };
+/* 一下 = keydown + keyup（确认键松开时才算短按，按住 650ms 是菜单，见 test/ui-emu.mjs） */
+const ev = (type, code) => page.evaluate(([t, c]) => document.dispatchEvent(new KeyboardEvent(t, { keyCode: c, bubbles: true })), [type, code]);
+const key = async (code, n = 1) => { for (let i = 0; i < n; i++) { await ev('keydown', code); await sleep(40); await ev('keyup', code); await sleep(150); } };
+const hold = async (code, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { await ev('keydown', code); await sleep(100); } await ev('keyup', code); await sleep(300); };
+const vt = () => page.evaluate(() => document.getElementById('v').currentTime);
+const subText = () => page.evaluate(() => (document.getElementById('sub').textContent || '').trim());
+const waitFor = async (pred, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(200); } return false; };
 const shot = async (name) => {
   const png = os.tmpdir() + '/tg-shot-' + name + '.png';
   await page.screenshot({ path: png });
@@ -104,20 +161,46 @@ const shot = async (name) => {
 };
 
 await page.goto('http://localhost:8768/app/index.html');
-/* 「看到哪里」：Sintel 看过一半，卡片上有进度条，打开从那里接着放 */
+/* 「看到哪里」：钢之泪看过一半，卡片上有进度条 */
 await page.evaluate((l) => { try { localStorage.clear(); localStorage.setItem('tg.lang.v1', l); } catch (e) {} }, EN ? 'en' : 'zh');
 await page.reload();
 await sleep(1200);
-await page.evaluate((t) => Store.setProgress('f0', 31, 52, t), items[0].title);
+await page.evaluate((t) => Store.setProgress('f2', 410, 734, t), items[2].title);
 await page.reload();
-await sleep(2500);
+await sleep(3000);
 await shot('01-home');
-await key(37); await sleep(700);
+/* 焦点开机停在看过的钢之泪（第二排中间）：左一下到第一列，再左一下才滑出来源栏 */
+await key(37, 2); await sleep(700);
 await shot('02-sources');
 await key(39); await sleep(500);
+
+/* Sintel（第一排第一个）：MKV、内嵌 10 条字幕 + 群里的中文字幕文件。中文界面自动开中文（对白是英语）；英文界面对白就是界面语言，
+ * 不自动开 —— 在菜单里选英语 */
+await key(38); await sleep(300);
 await key(13);
-/* 出画面之后再截：等播放头真的在走 */
-for (let i = 0; i < 40; i++) { await sleep(250); if (await page.evaluate(() => { const v = document.getElementById('v'); return v && v.currentTime > 30 && !v.paused; })) { break; } }
-await sleep(600);
+if (!await waitFor(async () => (await vt()) > 3, 15000)) console.log('  ✗ Sintel 15 秒没放起来');
+await hold(13, 900);
+const rows = await page.evaluate(() => [...document.querySelectorAll('#menu .mi')].map(e => e.textContent));
+console.log('  菜单：' + rows.join(' | '));
+await shot('04-menu');
+if (EN) {
+  const want = rows.findIndex(r => /^English/.test(r.replace(/^✓/, ''))), cur = await page.evaluate(() => [...document.querySelectorAll('#menu .mi')].findIndex(e => e.classList.contains('focus')));
+  await key(want > cur ? 40 : 38, Math.abs(want - cur)); await key(13);
+} else {
+  await key(10009);
+}
+/* 第二句（12.8–16.8 秒）在屏幕上时截 */
+if (!await waitFor(async () => (await vt()) > 13.6 && (await subText()) !== '', 25000)) console.log('  ✗ 13.6 秒后没有字幕：t=' + (await vt()).toFixed(1));
+console.log('  字幕：' + await subText());
 await shot('03-player');
+await key(10009); await sleep(1200);
+
+/* 网页链接：第二张卡片是 archive.org 的 Sita Sings the Blues（sites.js 问接口 → 1080p 原片） */
+await key(39); await sleep(300);
+await key(13);
+if (!await waitFor(async () => (await vt()) > 9, 25000)) console.log('  ✗ Sita 25 秒没放到第 9 秒');
+console.log('  网页链接：' + await page.evaluate(() => { const v = document.getElementById('v'); return v.videoWidth + 'x' + v.videoHeight + ' t=' + v.currentTime.toFixed(1); }));
+/* 暂停一下，片名和进度条露出来（不然截出来就是一张电影画面，看不出是这个应用在放） */
+await key(13); await sleep(800);
+await shot('05-web');
 await browser.close();

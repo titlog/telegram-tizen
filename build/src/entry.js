@@ -6,7 +6,7 @@
 import './compat.js';   // 要在 mtcute 之前（required_version 那代引擎缺的 API）
 import { TelegramClient, TelegramWorkerPort, WebCryptoProvider } from '@mtcute/web';
 import wasmSimd from '../node_modules/@mtcute/wasm/mtcute-simd.wasm';
-import wasmPlain from '../node_modules/@mtcute/wasm/mtcute.wasm';
+import wasmPlain from '../out/mtcute-mvp.wasm';   // 降成 MVP 的那份（bundle.sh），Tizen 5.5 认
 import workerSrc from '../out/worker.bundle.txt';
 import qrcode from 'qrcode-generator';
 

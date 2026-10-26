@@ -36,7 +36,7 @@ var Boot = (function () {
     /* 安装包的加载顺序，排在 config.js（它有自己的标签：deploy.sh 改写它）和这个文件之后。更新包带着自己的一份，所以一个版本
      * 可以加文件。tg.bundle.js、vendor/hls.min.js、sites.local.js 不在更新包里，永远从安装包读（tools/update-lib.mjs 的 PACKAGED）。 */
     var SCRIPTS = ["diag.js", "log.js", "i18n.js", "accounts.js", "apikey.js", "tg.bundle.js", "mp4.js", "mkv.js", "player.js",
-                   "vendor/hls.min.js", "web.js", "sites.local.js", "tg.js", "store.js", "cover.js", "subs.js", "update.js", "app.js", "selftest.js"];
+                   "vendor/hls.min.js", "web.js", "sites.js", "sites.local.js", "tg.js", "flac.js", "music.js", "store.js", "cover.js", "subs.js", "update.js", "app.js", "selftest.js"];
 
     var K_BUNDLE = "tg.update.bundle", K_META = "tg.update.meta",
         K_BOOTING = "tg.update.booting", K_BAD = "tg.update.bad";

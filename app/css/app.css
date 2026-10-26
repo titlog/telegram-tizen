@@ -195,3 +195,31 @@ video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; back
 #wl input { font-size: 40px; width: 960px; padding: 14px 18px; border: 3px solid #3a424b; border-radius: 10px; background: #1b2128; color: #fff; outline: none; }
 #wl input:focus { border-color: #2aabee; }
 #wl-msg { font-size: 30px; color: #f0b429; margin-top: 30px; min-height: 40px; }
+
+/* 音乐（music.js）：左边方形封面，右边歌名、歌手、来自哪个群、状态、下一首；底下进度条。背景是封面缩成小图再拉伸（不用 CSS 滤镜：
+ * 抖音项目实测滤镜在电视上很贵），压暗 */
+#music { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: #0e1115; display: none; overflow: hidden; }
+#music.on { display: block; }
+#mu-bg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-size: cover; background-position: center; opacity: 0.35; }
+#mu-art { position: absolute; left: 160px; top: 170px; width: 560px; height: 560px; border-radius: 16px; overflow: hidden; background: #1c2128;
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); }
+#mu-art .ph span { font-size: 48px; max-height: 320px; }
+#mu-img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+#mu-img.on { display: block; }
+#mu-meta { position: absolute; left: 820px; top: 230px; width: 960px; }
+#mu-title { font-size: 60px; line-height: 76px; font-weight: bold; max-height: 228px; overflow: hidden;
+            display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+#mu-artist { font-size: 40px; color: #c5cad0; margin-top: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#mu-from { font-size: 28px; color: #8b939b; margin-top: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#mu-state { font-size: 30px; color: #2aabee; margin-top: 40px; min-height: 40px; }
+#mu-state.err { color: #f0b429; }
+#mu-next { font-size: 28px; color: #8b939b; margin-top: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#mu-bar { position: absolute; left: 160px; top: 860px; width: 1600px; height: 8px; background: rgba(255, 255, 255, 0.25); border-radius: 4px; }
+#mu-fill { position: absolute; left: 0; top: 0; height: 8px; background: #2aabee; border-radius: 4px; }
+#mu-dot { position: absolute; top: -8px; width: 24px; height: 24px; margin-left: -12px; background: #fff; border-radius: 12px; }
+#mu-row { position: absolute; left: 160px; top: 900px; width: 1600px; font-size: 28px; color: #d0d4d8; }
+#mu-keys { float: right; color: #8b939b; font-size: 24px; }
+#music.on ~ #toast { bottom: auto; top: 60px; }
+/* 卡片上的专辑封面：方的，居中（卡片高 324），两边同一张图缩小拉伸铺底，同海报 */
+.thumb img.aimg { left: 126px; width: 324px; height: 324px; object-fit: cover; box-shadow: 0 0 30px rgba(0, 0, 0, 0.6); }
+.card .now { position: absolute; z-index: 1; left: 8px; top: 10px; background: #2aabee; color: #fff; font-size: 22px; padding: 4px 12px; border-radius: 6px; }

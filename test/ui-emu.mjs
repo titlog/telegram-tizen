@@ -37,6 +37,14 @@ addExtra('ui/ep1.mp4', { title: '测试剧 第1集', fileName: 'ep1.mp4', durati
 for (const f of fs.existsSync(`${ROOT}test/media/mkv`) ? fs.readdirSync(`${ROOT}test/media/mkv`).filter(f => /\.(mkv|webm)$/.test(f)).sort() : []) {
   addExtra('mkv/' + f, { title: 'MKV ' + f, fileName: f, duration: 0, asFile: true });
 }
+/* 音乐频道（id 6，只有歌）：test/media/music/ 里的几种格式（生成方法：一段 40 秒的双音正弦 src.wav，再用 ffmpeg 转 mp3 / m4a / opus / flac）。
+ * 有两首带「专辑图」（借用两张封面），别的没有 —— 卡片上是歌名卡片 */
+const musicItems = [['t.mp3', '测试歌 一', '测试歌手', 'audio/mpeg', 'bbb_200'], ['t.m4a', 'Test Song Two', 'Test Singer', 'audio/mp4', null],
+  ['t.opus', '测试歌 三', '测试歌手', 'audio/ogg', 'spring_70'], ['t.flac', 'Lossless Four', 'Test Singer', 'audio/flac', null]]
+  .filter(([f]) => fs.existsSync(`${ROOT}test/media/music/${f}`))
+  .map(([f, title, performer, mime, art], i) => ({ kind: 'music', key: 'mu' + i, fileKey: 'mu' + i, path: 'music/' + f, ext: f.split('.').pop(), title, performer, mime, art,
+    size: fs.statSync(`${ROOT}test/media/music/${f}`).size, duration: 40, fileName: f, date: Date.now() - (i + 1) * 3600000,
+    msg: { id: 300 + i, chat: { id: 6 } }, info: { year: '', rating: '', director: '' } }));
 const subFiles = { 'Double.Audio.2020.mp4': [{ name: 'Double.Audio.2020.chs.srt', lang: '简体', size: 141, score: 4, doc: { path: '/test/media/ui/ext_gbk.srt' } }] };
 
 /* 群里发的网页链接（web.js）：一条直接是 .m3u8 的，指向 test/media/hls（AES-128 加密的 HLS，生成方法：
@@ -55,6 +63,8 @@ var TG = (function () {
   var EXTRA = ${JSON.stringify(extra)};
   EXTRA.forEach(function (it) { it.date = new Date(it.date); });
   var SUBS = ${JSON.stringify(subFiles)};
+  var MUSIC = ${JSON.stringify(musicItems)};
+  MUSIC.forEach(function (it) { it.date = new Date(it.date); });
   LINKS.forEach(function (it) { it.date = new Date(it.date); });
   function httpSource(url, size) {
     var CH = Player.CH;
@@ -92,11 +102,13 @@ var TG = (function () {
     },
     videoCount: async function (src) { await new Promise(function (r) { setTimeout(r, 150); }); return src === 3 || src === 4 ? 0 : 5; },
     sources: async function () { return [{ id: "me", title: "Test", kind: "group" }, { id: 1, title: "视频分享群", kind: "group" }, { id: 4, title: "BotFather", kind: "user" },
-      { id: 2, title: "一个名字特别长的频道名字特别长的频道", kind: "channel" }, { id: 3, title: "空的群", kind: "group" }]; },
+      { id: 2, title: "一个名字特别长的频道名字特别长的频道", kind: "channel" }, { id: 3, title: "空的群", kind: "group" }, { id: 6, title: "音乐频道", kind: "channel" }]; },
     videos: async function (src) { await new Promise(function (r) { setTimeout(r, 300); });
-      var list = src === 3 ? [] : src === 1 ? ITEMS.slice(0, 3) : ITEMS; return { items: list, next: undefined, total: list.length }; },
-    links: async function (src) { return src === 3 || src === 1 ? [] : LINKS; },
+      var list = src === 3 ? [] : src === 6 ? MUSIC : src === 1 ? ITEMS.slice(0, 3) : ITEMS; return { items: list, next: undefined, total: list.length }; },
+    links: async function (src) { return src === 3 || src === 1 || src === 6 ? [] : LINKS; },
     thumb: async function (it) { window.__thumbCall && window.__thumbCall(); if (it.file === "e_long_2h" || it.file === "c_hevc") { return null; }
+      if (it.kind === "music") { if (!it.art) { return null; } var ab = await (await fetch("/test/media/thumbs/" + it.art + ".jpg")).arrayBuffer();
+        return { url: URL.createObjectURL(new Blob([ab], { type: "image/jpeg" })), bytes: ab }; }
       var b = await (await fetch("/test/media/thumbs/" + it.file + ".jpg")).arrayBuffer();
       return { url: URL.createObjectURL(new Blob([b], { type: "image/jpeg" })), bytes: b }; },
     source: function (it) { return httpSource("/test/media/" + (it.path || it.file + ".mp4"), it.size); },
@@ -386,6 +398,47 @@ if (!process.env.ONLY || process.env.ONLY === 'acct') {
   console.log('  按了检查更新：' + await txt('#opts-update'));
   await key(10009); await sleep(400);
   console.log('  返回之后：' + await page.evaluate(() => window.__app.screen()));
+}
+
+/* ---------- 音乐（ONLY=music 只跑这一段）：音乐频道 → 点第一首 → 下一首 / 上一首 → 返回列表接着放、卡片上「正在放」→ 点同一张回到画面不重放
+ * → 放视频时歌停 ---------- */
+if ((!process.env.ONLY || process.env.ONLY === 'music') && musicItems.length) {
+  const mu = () => page.evaluate(() => { const m = window.__app.music(), a = document.getElementById('au');
+    return { i: m.index, n: m.count, title: m.item && m.item.title, t: +a.currentTime.toFixed(1), paused: a.paused, screen: window.__app.screen() }; });
+  const waitT = async (t, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if ((await mu()).t > t) return true; await sleep(250); } return false; };
+  await key(10009); await sleep(300);
+  await key(37, 4); await key(40, 30);
+  for (let i = 0; i < 12 && !/音乐频道/.test(await txt('#rail-list .src.focus') || ''); i++) await key(38);
+  await key(13); await sleep(1500);
+  console.log('  音乐频道：' + await page.evaluate(() => [...document.querySelectorAll('.card')].map(c => c.querySelector('.title').textContent + '〔' + c.querySelector('.meta').textContent + '〕').join(' / ')) +
+    '，' + await txt('#src-sub'));
+  await shot('30-music-grid');
+  await key(13);
+  console.log('  点第一首：走起来 ' + await waitT(1.5) + ' ' + JSON.stringify(await mu()) + '，画面「' + await txt('#mu-title') + ' / ' + await txt('#mu-artist') + ' / ' + await txt('#mu-next') + '」');
+  await sleep(1500);
+  await shot('31-music-player');
+  await key(40); await sleep(200);
+  console.log('  ↓ 下一首：走起来 ' + await waitT(1) + ' ' + JSON.stringify(await mu()));
+  await key(38); await sleep(200);
+  console.log('  ↑ 上一首（这首不到 5 秒，回上一首）：走起来 ' + await waitT(1) + ' ' + JSON.stringify(await mu()));
+  await key(13); await sleep(400);
+  console.log('  确认 暂停：' + JSON.stringify(await mu()) + ' 状态「' + await txt('#mu-state') + '」');
+  await key(13); await sleep(600);
+  await key(10009); await sleep(1500);
+  const a1 = await mu();
+  console.log('  返回列表：' + JSON.stringify(a1) + '，正在放的卡片：' + await page.evaluate(() => [...document.querySelectorAll('.card')].filter(c => c.querySelector('.now')).map(c => c.querySelector('.title').textContent).join(',')));
+  await shot('32-music-back');
+  await key(13); await sleep(800);
+  const a2 = await mu();
+  console.log('  点同一张回到画面：' + JSON.stringify(a2) + (a2.t >= a1.t ? '（接着放，没重来）' : ' ✗ 重来了'));
+  await key(10009); await sleep(400);
+  /* 换到有视频的来源放一部：歌要停 */
+  await key(37, 4); await key(40, 30);
+  for (let i = 0; i < 14 && !/视频分享群/.test(await txt('#rail-list .src.focus') || ''); i++) await key(38);
+  await key(13); await sleep(1200);
+  await key(13); await sleep(2500);
+  console.log('  放视频之后：' + JSON.stringify(await mu()) + '，视频 t=' + (await vt()).toFixed(1));
+  await key(10009); await sleep(800);
 }
 
 /* ---------- MKV（有生成好的测试片才跑） ---------- */
