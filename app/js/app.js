@@ -55,8 +55,27 @@
         $("home").classList.add("hide");
         $("panel").classList.add("on");
         $("qr").style.display = "none";
-        $("how").innerHTML = "<div style='font-size:48px'>" + title + "</div><div style='font-size:30px;color:#999;margin-top:20px'>" + body + "</div>";
+        $("how").innerHTML = "<div style='font-size:48px'>" + title + "</div><div style='font-size:30px;color:#999;margin-top:20px'>" + body + "</div>" + reportHtml(300);
         S.screen = "bootfail";
+    }
+
+    /* 出错的地方都告诉观众可以到 GitHub 报：只看到一句报错，观众多半就不用了。码里是开好的新 issue，正文填着
+     * 电视编号和版本 —— 出了什么错不填：诊断日志开着时那份已经自动传了，按编号找得到；码也要短，长了电视上一格太小，沙发上扫不出来。
+     * mtcute 没加载起来时没有画码的 TGLib，只写地址 */
+    var ISSUES = "https://github.com/titlog/telegram-tizen/issues";
+    function issueUrl() {
+        var b = Boot.info(), tz = /Tizen (\d+(\.\d+)?)/.exec(navigator.userAgent);
+        var body = "TV code: " + Diag.status().device + " (" + (b.running || b.packaged) + (tz ? ", Tizen " + tz[1] : "") + ")\n\nWhat happened:\n";
+        return ISSUES + "/new?body=" + encodeURIComponent(body);
+    }
+    function reportQr() { return typeof TGLib !== "undefined" && TGLib.qrSvg ? TGLib.qrSvg(issueUrl(), 4) : ""; }
+    function reportHtml(size) {
+        var st = Diag.status(), qr = reportQr();
+        var logs = st.enabled && st.configured ? "<br>" + T("诊断日志会自动传给开发者，issue 里带着这台电视的编号 {0}，对得上。", st.device) : "";
+        return "<div class='report'>" + (qr ? "<div class='rq' style='width:" + size + "px;height:" + size + "px'>" + qr + "</div>" : "") +
+            "<div class='rt'>" + (qr ? T("反复出现的话，用手机扫这个码到 GitHub 留个 issue，开发者会尽快想办法解决。") :
+                                       T("反复出现的话，到 GitHub 留个 issue，开发者会尽快想办法解决：") + "<br><b>github.com/titlog/telegram-tizen/issues</b>") +
+            logs + "</div></div>";
     }
 
     async function boot() {
@@ -149,7 +168,7 @@
     }
 
     /* 左边只列有视频的来源。每个来源问一次「有几个视频」（limit 1），结果存在电视上，下次启动先用存的、后台再问一遍。 */
-    /* 来源栏的刷新：第一版只在启动时取一次，之后新建 / 加入的群、刚转发进视频的群都不出现（用户 2026-10-01 问「怎么没有及时更新」）。
+    /* 来源栏的刷新：第一版只在启动时取一次，之后新建 / 加入的群、刚转发进视频的群都不出现。
      * 现在打开来源栏时（20 秒内只一次）、从后台切回来时、停在主页每 5 分钟都重新取一遍。 */
     var srcAt = 0;
     function refreshSources(force) {
@@ -356,7 +375,7 @@
             S.loading = false;
             R("来源「" + Diag.priv(src.title) + "」出错 " + errStr(e));
             $("src-sub").textContent = "";
-            $("empty").innerHTML = T("读不到这里的视频：{0}<br>按确认重试", esc(errStr(e)));
+            $("empty").innerHTML = T("读不到这里的视频：{0}<br>按确认重试", esc(errStr(e))) + reportHtml(240);
             Diag.incident("读不到来源里的视频：" + errStr(e));
             return;
         }
@@ -415,7 +434,7 @@
         return items;
     }
 
-    /* ---------- 播放记录（用户 2026-10-26：「方便找」）---------- */
+    /* ---------- 播放记录 ---------- */
 
     /* 开始放就记一笔（音乐只记点的那首，自动接下去的不记）。找不回来的不记：自测的假片子、没有消息编号的 */
     function remember(it) {
@@ -434,7 +453,7 @@
             if (g !== S.gen) { return; }
             S.loading = false;
             R("播放记录出错 " + errStr(e));
-            $("empty").innerHTML = T("读不到播放记录：{0}<br>按确认重试", esc(errStr(e)));
+            $("empty").innerHTML = T("读不到播放记录：{0}<br>按确认重试", esc(errStr(e))) + reportHtml(240);
             return;
         }
         if (g !== S.gen) { return; }
@@ -455,7 +474,7 @@
             if (g !== S.gen) { return; }
             S.loading = false;
             R("搜索「" + Diag.priv(src.query) + "」出错 " + errStr(e));
-            $("empty").innerHTML = T("搜索出错：{0}<br>按确认重试", esc(errStr(e)));
+            $("empty").innerHTML = T("搜索出错：{0}<br>按确认重试", esc(errStr(e))) + reportHtml(240);
             Diag.incident("搜索出错：" + errStr(e));
             return;
         }
@@ -575,6 +594,9 @@
         }).join("");
         $("opts-diag").textContent = diagLine();
         $("opts-update").textContent = updateLine();
+        var qr = reportQr();
+        $("opts-qr").innerHTML = qr;
+        $("opts-qr").style.display = qr ? "block" : "none";
     }
     function openOpts() {
         S.screen = "opts";
@@ -701,7 +723,7 @@
             if (e.needLogin) {
                 R("列表「" + Diag.priv(src.title) + "」要登录：" + errStr(e) + (S.loggedIn[src.id] ? "（刚登录成功过 —— 登录状态没带上）" : ""));
                 if (S.loggedIn[src.id]) {
-                    $("empty").innerHTML = T("登录成功了，但还是看不到这个列表。<br>电视可能带不上这个网站的登录状态（日志里有详情）。");
+                    $("empty").innerHTML = T("登录成功了，但还是看不到这个列表。<br>电视可能带不上这个网站的登录状态（日志里有详情）。") + reportHtml(240);
                     Diag.incident("网页列表登录成功了还是看不到：" + errStr(e));
                 } else {
                     $("empty").innerHTML = T("这个列表要登录一次才能看（查账号编号）。<br>按确认登录");
@@ -710,7 +732,7 @@
                 return;
             }
             R("列表「" + Diag.priv(src.title) + "」出错 " + errStr(e));
-            $("empty").innerHTML = T("读不到这个列表：{0}<br>按确认重试", esc(errStr(e)));
+            $("empty").innerHTML = T("读不到这个列表：{0}<br>按确认重试", esc(errStr(e))) + reportHtml(240);
             Diag.incident("读不到网页列表：" + errStr(e));
             return;
         }
@@ -848,8 +870,8 @@
         var el = $("c" + S.focus);
         if (el && S.zone === "grid") { el.classList.add("focus"); }
         var row = Math.floor(S.focus / COLS), rows = Math.ceil(S.items.length / COLS);
-        /* 只在要选的那一排露不全时才滚，滚到刚好露全为止；看得见的就只挪焦点、画面不动（用户 2026-10-02：「眼睛里有 9 个视频，
-         * 想选第一行中间那个，一按上键那一行就滑下来，眼睛还得跟着动」—— 第一版是焦点那一排永远停在第二排的位置）。
+        /* 只在要选的那一排露不全时才滚，滚到刚好露全为止；看得见的就只挪焦点、画面不动（第一版焦点那一排永远停在第二排的位置：
+         * 想选第一排中间那个，一按上键整排滑下来，眼睛还得跟着找）。
          * 卡片 450 高，上面留 TOP（描边），下面留 10 */
         var y = TOP + row * PITCH_Y, off = S.gridOff || 0;
         if (y - TOP < off) { off = y - TOP; }
@@ -1222,7 +1244,7 @@
          * 「放不了：90 秒没出画面」紧跟着「放不了：timeout」、出事也记两回）。play() 开头会把 perr 藏起来 */
         if ($("perr").style.display === "block") { return; }
         spin(false);
-        $("perr").innerHTML = T("放不了：{0}", esc(msg || T("未知错误"))) + "<br><span style='color:#8b939b;font-size:28px'>" + T("按返回键回到列表") + "</span>";
+        $("perr").innerHTML = T("放不了：{0}", esc(msg || T("未知错误"))) + "<br><span style='color:#8b939b;font-size:28px'>" + T("按返回键回到列表") + "</span>" + reportHtml(240);
         $("perr").style.display = "block";
         R("放不了：" + msg);
         Diag.incident("放不了：" + msg);
@@ -1726,7 +1748,7 @@
     }
 
     /* 快进快退：连按的步长累加，停手 0.7 秒才真的跳（每跳一次可能要重新下载）。
-     * 按住不放越按越快（用户 2026-10-01：「无论按多久都是逐秒快进」）：同一个键两次之间不到 0.4 秒算按住，
+     * 按住不放越按越快（第一版按多久都是一步一步地走）：同一个键两次之间不到 0.4 秒算按住，
      * 按住的时间决定每一下的步长。 */
     var STEPS = {
         small: { at: [0, 1, 2, 3, 5], step: [15, 30, 60, 120, 300] },      // ← →（按一下 15 秒，用户 2026-10-02；原来 10 秒）
@@ -1927,6 +1949,8 @@
         if (TG.leaving()) { return; }
         R("启动出错 " + errStr(e) + " | " + String(e && e.stack || "").split("\n").slice(0, 3).join(" "));
         Diag.incident("启动出错：" + errStr(e));
+        /* 以前屏幕上什么都不变：扫码页上码不再换、或者停在空白的主页，观众只能干等。到了主页之后的错各处自己管（来源、播放器） */
+        if (S.screen !== "home") { bootFail(T("启动出错"), esc(errStr(e)) + "<br>" + T("按确认重试，按返回键退出")); }
     });
 
     /* 自动更新（update.js）：先报这次跑的是哪份代码、为什么，每次开机一分钟后查，开着每六小时；第一次跑一个新下载的版本时提示一次 */

@@ -12,8 +12,8 @@
 
 以前只能从源码装，因为包里要有 API ID / Hash。查 Telegram 的规定（core.telegram.org/api/obtaining_api_id、/api/terms）：**发布出去的应用
 用发布者自己申请的那组**，用户不用各自申请；一个手机号只能有一个 API ID；违规时先通知负责的账号，10 天不改才停掉。Hash 藏不住 ——
-Telegram 官方 Android 客户端的源码里就写着它自己的（`APP_ID = 4`），闭源客户端也得把它放在包里。用户（10-21）定的：**像 Nicegram 那样
-内置这个项目的那组，填写页兜底**，并且「别泄露明文」。
+Telegram 官方 Android 客户端的源码里就写着它自己的（`APP_ID = 4`），闭源客户端也得把它放在包里。定下来的做法（10-21）：**像 Nicegram 那样
+内置这个项目的那组，填写页兜底**，包里不放明文。
 - **包里怎么带**：deploy.sh 给自己电视打的包是明文（`TG_API_ID` / `TG_API_HASH`）；release.sh 打的发布包只写 `TG_API_PACKED`
   （8 字节随机盐 + 逐字节异或，base64），`apikey.js` 的 `unpack()` 解。**不是加密**，挡的是解压之后 grep、扫 32 位十六进制串。
   release.sh 读回：包里每个文件都没有明文 hash，config.js 里没有 ID 的数字，用 apikey.js 本身解开就是 `~/.telegram-tizen.conf` 那一组。

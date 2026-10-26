@@ -4,7 +4,7 @@
  * your own API id before you publish your app」），用户不用各自申请 —— Nicegram 这类上架的第三方客户端都是内置一组。Hash 藏不住
  * （Telegram 官方 Android 客户端的源码里就写着它自己的），Telegram 管的是应用的行为：违规先通知负责的账号，10 天不改才停掉。
  * 所以（用户 2026-10-21 定的）安装包里带一组，取自 ~/.telegram-tizen.conf，仓库里不存：deploy.sh 打进自己电视的包是明文
- * （TG_API_ID / TG_API_HASH），release.sh 打进发布包的是打乱过的一串（TG_API_PACKED，用户：「别泄露明文」）。那不是加密 —— 解开它的
+ * （TG_API_ID / TG_API_HASH），release.sh 打进发布包的是打乱过的一串（TG_API_PACKED，包里不放明文）。那不是加密 —— 解开它的
  * 代码就在下面，下决心的人照样解得出来（闭源的客户端也一样，凭证总得在包里）；挡的是解压之后 grep、扫 32 位十六进制串的工具。
  *
  * 填写页（app.js 的 #api）是后路：包里那组被 Telegram 停了、或者包里压根没带（deploy.sh --noapi），用户填自己在 my.telegram.org

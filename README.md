@@ -86,8 +86,9 @@ the original picture quality, and your phone is free as soon as the message is s
 - **Self-update** (from 1.1.0): a newer signed version is downloaded in the background while the app is open and runs
   from the next launch, with an "Updated to x.y.z" notice.
 - **Diagnostic logs** (from 1.1.0): when something goes wrong, the app sends the developer the information needed to
-  find out why, and nothing that identifies you. It can be switched off under Settings in the source list; when
-  reporting a problem, quote the TV's code shown there.
+  find out why, and nothing that identifies you. It can be switched off under Settings in the source list. Error
+  screens and Settings show a QR code that opens a new GitHub issue with the TV's code already filled in, so the
+  report and the logs can be matched.
 
 Subtitles turn on by themselves only when the dialogue is not in the interface language **and** a subtitle track or
 file in that language exists — with the English interface, an English subtitle for a film in another language;

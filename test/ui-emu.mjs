@@ -35,6 +35,8 @@ const addExtra = (path, o) => { if (!fs.existsSync(`${ROOT}test/media/${path}`))
 addExtra('ui/multi.mp4', { title: '双音轨 + 内嵌字幕', fileName: 'Double.Audio.2020.mp4', duration: 60 });
 addExtra('ui/ep2.mp4', { title: '测试剧 第2集', fileName: 'ep2.mp4', duration: 12 });
 addExtra('ui/ep1.mp4', { title: '测试剧 第1集', fileName: 'ep1.mp4', duration: 12 });
+/* 放不了的：字幕文件冒充的 MP4（ONLY=report） */
+addExtra('ui/ext_gbk.srt', { title: '坏文件 Broken', fileName: 'broken.mp4', duration: 60 });
 for (const f of fs.existsSync(`${ROOT}test/media/mkv`) ? fs.readdirSync(`${ROOT}test/media/mkv`).filter(f => /\.(mkv|webm)$/.test(f)).sort() : []) {
   addExtra('mkv/' + f, { title: 'MKV ' + f, fileName: f, duration: 0, asFile: true });
 }
@@ -83,7 +85,9 @@ var TG = (function () {
   }
   return {
     /* 多账号：「我是谁」按当前账号的库答（tg-session-3 故意也是爸爸 —— 添加了一个已经在的账号）。扫码：stub.noscan 不在就 1.5 秒后自动「扫上」 */
-    init: async function () {}, mode: function () { return "stub"; },
+    /* stub.failInit：连不上 Telegram（ONLY=report 看启动失败那一页） */
+    init: async function () { if (localStorage.getItem("stub.failInit")) { throw new Error("WebSocket closed before the connection was established"); } },
+    mode: function () { return "stub"; },
     me: async function () {
       var USERS = { "tg-session": { id: 101, displayName: "爸爸" }, "tg-session-2": { id: 202, displayName: "妈妈" }, "tg-session-3": { id: 101, displayName: "爸爸" } };
       var st = Accounts.active().storage, logged = JSON.parse(localStorage.getItem("stub.logged") || '["tg-session"]');
@@ -114,6 +118,7 @@ var TG = (function () {
       return { url: URL.createObjectURL(new Blob([b], { type: "image/jpeg" })), bytes: b }; },
     source: function (it) { return httpSource("/test/media/" + (it.path || it.file + ".mp4"), it.size); },
     search: async function (q) { await new Promise(function (r) { setTimeout(r, 200); });
+      if (q === "__fail__") { throw new Error("FLOOD_WAIT_30"); }
       var list = EXTRA.filter(function (it) { return it.title.indexOf(q) >= 0; }); return { items: list, next: undefined, total: list.length }; },
     subtitlesFor: async function (it) { return SUBS[it.fileName] || []; },
     /* 播放记录：按「会话 + 消息编号」找回（真的 tg.js 是 getMessages）。网页链接按地址 */
@@ -486,6 +491,35 @@ if (!process.env.ONLY || process.env.ONLY === 'history') {
   await toRailItem(/^(播放记录|History)/);
   console.log('  清空之后：' + await txt('#empty'));
   await key(10009); await sleep(300);
+}
+
+/* ---------- 出错时提示到 GitHub 报（ONLY=report）：搜索出错、放不了、启动时连不上都带着码；设置页一直挂着码 ---------- */
+if (!process.env.ONLY || process.env.ONLY === 'report') {
+  const qrSize = (sel) => page.evaluate((s) => { const q = document.querySelector(s); return q ? Math.round(q.getBoundingClientRect().width) : 0; }, sel);
+  /* 桌面浏览器上 diag.js 没有接收地址（不传）；装成电视上那样，看「诊断日志会自动传给开发者」那一句 */
+  await page.evaluate(() => { const st = Diag.status; Diag.status = () => Object.assign(st(), { enabled: true, configured: true }); });
+  await search('__fail__');
+  console.log('  搜索出错：' + await txt('#empty') + '（码 ' + await qrSize('#empty .rq svg') + 'px）');
+  await shot('35-report-search');
+  await search('坏文件');
+  await key(13);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 30000 && !await page.evaluate(() => document.getElementById('perr').style.display === 'block')) await sleep(300);
+  console.log('  放不了（' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒）：' + await txt('#perr') + '（码 ' + await qrSize('#perr .rq svg') + 'px）');
+  await shot('36-report-player');
+  await key(10009); await sleep(800);
+  await key(37, 4); await key(40, 30);
+  for (let i = 0; i < 6 && !/^(设置|Settings)$/.test(await txt('#rail-list .src.focus') || ''); i++) await key(38);
+  await key(13); await sleep(400);
+  console.log('  设置页的码 ' + await qrSize('#opts-qr svg') + 'px：' + await txt('#opts-report'));
+  await shot('37-report-opts');
+  await key(10009); await sleep(300);
+  await page.evaluate(() => localStorage.setItem('stub.failInit', '1'));
+  await page.reload(); await sleep(1500);
+  console.log('  启动时连不上：' + await txt('#how') + '（码 ' + await qrSize('#how .rq svg') + 'px）');
+  await shot('38-report-boot');
+  await page.evaluate(() => localStorage.removeItem('stub.failInit'));
+  await page.reload(); await sleep(1500);
 }
 
 /* ---------- MKV（有生成好的测试片才跑） ---------- */

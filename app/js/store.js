@@ -154,7 +154,7 @@ var Store = (function () {
         }).catch(function () {});
     }
 
-    /* 播放记录（来源栏的「播放记录」，用户 2026-10-26：「方便找」）：每人一份，最近的在前，最多 200 条。只存找回它要的东西 ——
+    /* 播放记录（来源栏的「播放记录」）：每人一份，最近的在前，最多 200 条。只存找回它要的东西 ——
      * 哪个会话的第几条消息（mtcute 的文档对象存不进 localStorage，打开时再向 Telegram 取）；网页链接存地址、标题、站名。
      * {k: fileKey, kind: "video" | "music" | "web", chat, msg, url, site, title, image, at} */
     var HKEY = mine("tg.history.v1"), hist = read(HKEY, []);

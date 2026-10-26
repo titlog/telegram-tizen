@@ -77,7 +77,7 @@ zsh tools/deploy.sh --music                      # 音乐在电视上走一遍�
 node ../bilibili-tizen/tools/diag-logs.mjs --app telegram-tizen   # 读别人电视传上来的（--device 编号 / <id>）
 zsh tools/release.sh                             # 发布包 → dist/telegram-tizen-<版本>.wgt
 node test/serve.mjs & node test/run.mjs media/a_h264_fast.mp4 "media/b_h264_moovend.mp4?start=30"   # 改 player.js 之后
-node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv / acct / music / history 只跑那一段，UILANG=en 英文界面）
+node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv / acct / music / history / report 只跑那一段，UILANG=en 英文界面）
 ```
 **自测构建（--diag / --loginexpiry / --samples / --music）测完马上 `zsh tools/deploy.sh` 装回正常构建。**
 

@@ -5,7 +5,7 @@
 # 重新签。所以要紧的是包里有什么、不能有什么：
 #
 #   - 带着这个项目的 API ID / Hash（2026-10-21，issue #1；用户定的：像 Nicegram 那样内置一组，填写页兜底，见 app/js/apikey.js），
-#     但不是明文（用户：「别泄露明文」）：取自 ~/.telegram-tizen.conf，打乱成 TG_API_PACKED，只写进临时目录里的 config.js，仓库里那份
+#     但不是明文：取自 ~/.telegram-tizen.conf，打乱成 TG_API_PACKED，只写进临时目录里的 config.js，仓库里那份
 #     保持空值。不是加密，解开它的代码就在包里；挡的是解压之后 grep 和扫十六进制串的工具。读回验证：包里每个文件都没有这个 hash，
 #     config.js 里没有 ID 的数字，用 apikey.js 本身解开得到的就是这一组。
 #   - 没有上报地址。deploy.sh 把这台电脑的局域网地址写进 config.js；带着它的包会让每台电视往别人网里的一台电脑报日志。
