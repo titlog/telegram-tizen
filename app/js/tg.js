@@ -397,6 +397,34 @@ var TG = (function () {
         };
     }
 
+    /* 播放记录里的那些（Store.history）找回来：按会话分组，一个会话一次 getMessages。消息删了、频道退了的跳过（返回里数着）。
+     * 网页链接不用取消息，存的地址、标题就够。顺序照记录的（最近放的在前） */
+    async function byRefs(refs) {
+        var byChat = {}, got = {}, missing = 0;
+        refs.forEach(function (h) { if (h.chat && h.msg) { (byChat[h.chat] = byChat[h.chat] || []).push(h.msg); } });
+        await Promise.all(Object.keys(byChat).map(async function (chat) {
+            try {
+                var ms = await again(function () { return client.getMessages(isNaN(+chat) ? chat : +chat, byChat[chat]); });
+                ms.forEach(function (m) { if (m && m.media) { got[chat + ":" + m.id] = m; } });
+            } catch (e) { /* 频道退了、没权限：这个会话里的都算找不到 */ }
+        }));
+        var items = [];
+        refs.forEach(function (h) {
+            if (h.kind === "web") {
+                var site = h.site || (function () { try { return new URL(h.url).hostname.replace(/^www\./, ""); } catch (e) { return ""; } })();
+                items.push({ kind: "web", key: "web:" + h.url, fileKey: h.k, url: h.url, site: site, doc: null, image: h.image || "", title: h.title || h.url,
+                             caption: "", size: 0, duration: 0, date: new Date(h.at), playedAt: h.at, hasCover: false, info: { year: "", rating: "", director: "" } });
+                return;
+            }
+            var m = got[h.chat + ":" + h.msg];
+            if (!m || !(isVideoMsg(m) || isVideoDoc(m) || isMusic(m))) { missing++; return; }
+            var it = describe(m);
+            it.playedAt = h.at;
+            items.push(it);
+        });
+        return { items: items, missing: missing };
+    }
+
     /* 封面：挑宽度接近 want 的那张缩略图，下下来做成 blob: 地址 */
     async function thumb(item, want) {
         var ts = item.doc.thumbnails || [];
@@ -455,7 +483,7 @@ var TG = (function () {
 
     return {
         init: init, me: me, login: login, logout: logout, sources: sources, videos: videos, links: links, videoCount: videoCount, thumb: thumb, cover: cover, source: source,
-        search: search, subtitlesFor: subtitlesFor, download: download,
+        search: search, subtitlesFor: subtitlesFor, download: download, byRefs: byRefs,
         describe: describe,
         mode: function () { return mode; },
         primaryDc: function () { return client.getPrimaryDcId(); },

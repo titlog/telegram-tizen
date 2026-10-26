@@ -262,6 +262,14 @@ var I18n = (function () {
         "40 秒没出画面": "No picture after 40 seconds",
         "不知道文件多大": "The server didn't say how big the file is",
 
+        /* ---------- 播放记录 ---------- */
+        "播放记录": "History",
+        "读不到播放记录：{0}<br>按确认重试": "Couldn't load your history: {0}<br>Press OK to retry",
+        "还没有放过什么。<br>放过的视频、网页链接和歌会记在这里，最近的在前。": "Nothing played yet.<br>Videos, web links and songs you play are listed here, most recent first.",
+        "清空播放记录": "Clear history",
+        "再按一次确认键，清空播放记录": "Press OK again to clear your history",
+        "播放记录清空了": "History cleared",
+
         /* ---------- 音乐（music.js、app.js） ---------- */
         "音乐": "Music",
         "♪ 正在放": "♪ Playing",

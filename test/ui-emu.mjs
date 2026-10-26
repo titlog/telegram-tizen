@@ -17,6 +17,7 @@ for (let i = 0; i < 11; i++) {
   const size = fs.statSync(`${ROOT}test/media/${f}.mp4`).size;
   items.push({ key: 'k' + i, fileKey: 'f' + i, file: f, title: titles[i % titles.length] + (i >= media.length ? ' #' + i : ''),
     size, duration: f === 'e_long_2h' ? 7200 : f === 'a_h264_fast' || f === 'b_h264_moovend' ? 60 : 30, date: Date.now() - i * 86400000 * 3,
+    msg: { id: 10 + i, chat: { id: 2 } }, chatTitle: '一个名字特别长的频道名字特别长的频道',
     info: f === 'e_long_2h' ? { year: '2001', rating: '8.7', director: '雷德利·斯科特' } : { year: '', rating: '', director: '' } });
 }
 
@@ -115,6 +116,17 @@ var TG = (function () {
     search: async function (q) { await new Promise(function (r) { setTimeout(r, 200); });
       var list = EXTRA.filter(function (it) { return it.title.indexOf(q) >= 0; }); return { items: list, next: undefined, total: list.length }; },
     subtitlesFor: async function (it) { return SUBS[it.fileName] || []; },
+    /* 播放记录：按「会话 + 消息编号」找回（真的 tg.js 是 getMessages）。网页链接按地址 */
+    byRefs: async function (refs) {
+      var all = ITEMS.concat(EXTRA, MUSIC), items = [], missing = 0;
+      refs.forEach(function (h) {
+        if (h.kind === "web") { items.push({ kind: "web", key: "web:" + h.url, fileKey: h.k, url: h.url, site: h.site, doc: null, title: h.title, date: new Date(h.at), playedAt: h.at, info: { year: "", rating: "", director: "" } }); return; }
+        var it = all.filter(function (x) { return x.msg && x.msg.chat.id === h.chat && x.msg.id === h.msg; })[0];
+        if (!it) { missing++; return; }
+        items.push(Object.assign({}, it, { playedAt: h.at }));
+      });
+      return { items: items, missing: missing };
+    },
     download: async function (doc) { return new Uint8Array(await (await fetch(doc.path)).arrayBuffer()); },
     describe: function (x) { return x; }
   };
@@ -275,7 +287,7 @@ console.log('  跳 +20 秒之后 t=' + await page.evaluate(() => document.getEle
 await key(10009); await sleep(800);
 await shot('13-web-back');
 /* 网页列表当来源：来源栏最上面是「示例站 收藏」→ 要登录 → 先输错再输对 → 列表 → 往下翻第二页 → 放一个 */
-await key(37, 3); await key(38, 8); await key(40); await sleep(300);      // 最上面是「搜索」，下一个才是网页列表
+await key(37, 3); await key(38, 8); await key(40, 2); await sleep(300);      // 最上面是「搜索」「播放记录」，再下一个才是网页列表
 await shot('14-rail-web');
 await key(13); await sleep(1200);
 await shot('15-login');
@@ -439,6 +451,41 @@ if ((!process.env.ONLY || process.env.ONLY === 'music') && musicItems.length) {
   await key(13); await sleep(2500);
   console.log('  放视频之后：' + JSON.stringify(await mu()) + '，视频 t=' + (await vt()).toFixed(1));
   await key(10009); await sleep(800);
+}
+
+/* ---------- 播放记录（ONLY=history 只跑这一段）：放两部 → 来源栏「播放记录」→ 最近放的在第一个、写着哪个群和看到哪里 → 点开接着放 →
+ * 设置里清空（按两下）→ 空的 ---------- */
+if (!process.env.ONLY || process.env.ONLY === 'history') {
+  const toRailItem = async (re) => {
+    await key(37, 4); await key(40, 30);
+    for (let i = 0; i < 16 && !re.test(await txt('#rail-list .src.focus') || ''); i++) await key(38);
+    await key(13); await sleep(1200);
+  };
+  const cards = () => page.evaluate(() => [...document.querySelectorAll('.card')].map(c => c.querySelector('.title').textContent + '〔' + c.querySelector('.meta').textContent + '〕'));
+  await key(10009); await sleep(300);
+  await toRailItem(/一个名字特别长的频道/);
+  /* 放第三个，再放第一个（放 4 秒，存下进度）*/
+  await key(39, 2); await key(13); await sleep(4000); await key(10009); await sleep(800);
+  await key(37, 2); await key(13); await sleep(6500); await key(10009); await sleep(800);
+  await toRailItem(/^(播放记录|History)/);
+  const h1 = await cards();
+  console.log('  播放记录：' + h1.slice(0, 3).join(' / ') + '（共 ' + h1.length + ' 个），' + await txt('#src-sub'));
+  await shot('34-history');
+  await key(13); await sleep(3500);
+  console.log('  从记录里点开第一个：t=' + (await vt()).toFixed(1) + '（之前只看了 6 秒：不到 20 秒的从头放，这是对的）');
+  await key(10009); await sleep(800);
+  /* 设置里清空：按一下只提示，第二下才清 */
+  await toRailItem(/^(设置|Settings)/);
+  const optsTo = async (re) => { for (let i = 0; i < 6 && !re.test(await txt('#opts-list .ai.focus') || ''); i++) await key(40); };
+  await optsTo(/清空播放记录|Clear history/);
+  await key(13); await sleep(300);
+  const once = await page.evaluate(() => Store.history().length);
+  await key(13); await sleep(300);
+  console.log('  清空：按一下后还剩 ' + once + ' 条，按两下后 ' + await page.evaluate(() => Store.history().length) + ' 条');
+  await key(10009); await sleep(300);
+  await toRailItem(/^(播放记录|History)/);
+  console.log('  清空之后：' + await txt('#empty'));
+  await key(10009); await sleep(300);
 }
 
 /* ---------- MKV（有生成好的测试片才跑） ---------- */

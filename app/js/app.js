@@ -312,8 +312,9 @@
     /* 来源栏最上面是「搜索」，最下面是「退出登录」、换界面语言。换语言那一项用要换成的那种语言写（看不懂当前语言的人也认得出） */
     function railItems() {
         var sx = { id: "__search", title: S.src && S.src.kind === "search" ? T("搜索：{0}", S.src.query) : T("搜索"), kind: "" };
+        var hx = { id: "__history", title: T("播放记录"), kind: "history" };
         var a = Accounts.active();
-        return [sx].concat(S.sources, [{ id: "__acct", title: a.name ? T("账号：{0}", a.name) : T("账号"), kind: "" },
+        return [sx, hx].concat(S.sources, [{ id: "__acct", title: a.name ? T("账号：{0}", a.name) : T("账号"), kind: "" },
                                        { id: "__opts", title: T("设置"), kind: "" },
                                        { id: "__lang", title: I18n.lang === "en" ? "中文界面" : "English", kind: "" }]);
     }
@@ -334,7 +335,7 @@
     /* opts.quiet：开机进上次的来源时，要登录的不自动弹登录框（用户 2026-10-02：每次开机都被它挡住），按确认才弹 */
     async function openSource(src, opts) {
         S.src = { id: src.id, title: src.title, kind: src.kind, url: src.url, query: src.query };
-        if (src.kind !== "search") { Store.setLastSource(S.src); }      // 开机不重新搜一遍，进上次的群
+        if (src.kind !== "search" && src.kind !== "history") { Store.setLastSource(S.src); }      // 开机不重新搜一遍、不进播放记录，进上次的群
         var g = ++S.gen;
         S.items = []; S.next = undefined; S.total = 0; S.focus = 0; S.gridOff = 0; S.loading = true;
         $("src-title").textContent = src.title;
@@ -344,6 +345,7 @@
         var t0 = performance.now(), page, links;
         if (src.kind === "web") { return openWebList(S.src, g, t0, opts || {}); }
         if (src.kind === "search") { return openSearch(S.src, g, t0); }
+        if (src.kind === "history") { return openHistory(g, t0); }
         /* 群里发的网站链接（web.js）跟视频混在一起按时间排。只取最近 40 条带链接的消息，翻页只翻视频 */
         var linksP = TG.links(src.id, 40).catch(function (e) { R("来源「" + Diag.priv(src.title) + "」取链接出错 " + errStr(e)); return []; });
         try {
@@ -411,6 +413,37 @@
     function withDur(items) {
         items.forEach(function (it) { if (it.asFile && !it.duration) { it.duration = Store.dur(it.fileKey); } });
         return items;
+    }
+
+    /* ---------- 播放记录（用户 2026-10-26：「方便找」）---------- */
+
+    /* 开始放就记一笔（音乐只记点的那首，自动接下去的不记）。找不回来的不记：自测的假片子、没有消息编号的 */
+    function remember(it) {
+        if (/^selftest:/.test(it.key || "")) { return; }
+        var h = { k: it.fileKey || it.key, kind: it.kind === "music" || it.kind === "web" ? it.kind : "video", title: it.title, at: Date.now() };
+        if (it.msg && it.msg.chat && it.msg.chat.id && it.msg.id) { h.chat = it.msg.chat.id; h.msg = it.msg.id; }
+        if (it.kind === "web") { h.url = it.url; h.site = it.site; h.image = it.image || ""; }
+        if (h.kind === "web" ? !h.url : !h.chat) { return; }
+        Store.addHistory(h);
+    }
+
+    async function openHistory(g, t0) {
+        var refs = Store.history(), r;
+        try { r = await TG.byRefs(refs); }
+        catch (e) {
+            if (g !== S.gen) { return; }
+            S.loading = false;
+            R("播放记录出错 " + errStr(e));
+            $("empty").innerHTML = T("读不到播放记录：{0}<br>按确认重试", esc(errStr(e)));
+            return;
+        }
+        if (g !== S.gen) { return; }
+        S.loading = false;
+        S.items = withDur(r.items);
+        S.total = S.items.length;
+        R("播放记录 " + Math.round(performance.now() - t0) + "ms，记了 " + refs.length + " 条，找回 " + S.items.length + " 个" + (r.missing ? "（" + r.missing + " 个消息没了）" : ""));
+        renderGrid();
+        if (!S.items.length) { $("empty").innerHTML = T("还没有放过什么。<br>放过的视频、网页链接和歌会记在这里，最近的在前。"); }
     }
 
     /* ---------- 搜索（所有会话里的视频）---------- */
@@ -524,7 +557,15 @@
                 if (!Diag.enabled()) { S.opts.note = T("诊断日志关着，先把它打开"); return; }
                 Diag.upload(redraw);
             } },
-            { label: T("检查更新"), sep: true, act: function () { Update.check(redraw); } }
+            { label: T("检查更新"), sep: true, act: function () { Update.check(redraw); } },
+            /* 按两下才清（一家人共用一个账号时，别手滑） */
+            { label: T("清空播放记录"), sep: true, act: function () {
+                if (Date.now() - (S.opts.clearAt || 0) > 3000) { S.opts.clearAt = Date.now(); toast(T("再按一次确认键，清空播放记录")); return; }
+                S.opts.clearAt = 0;
+                R("清空播放记录（" + Store.history().length + " 条）");
+                Store.clearHistory();
+                toast(T("播放记录清空了"));
+            } }
         ];
     }
     function drawOpts() {
@@ -759,7 +800,9 @@
         var ext = it.asFile && /\.(mkv|webm|mov|m4v)$/i.exec(it.fileName || ""), mu = it.kind === "music";
         var what = mu ? [it.performer, (it.ext || "").toUpperCase(), fmtSize(it.size)].filter(Boolean).join(" · ") :
             it.kind === "web" ? T("网页 · {0}", it.site) : (ext ? ext[1].toUpperCase() + " · " : "") + fmtSize(it.size);
-        var meta = [S.src && S.src.kind === "search" ? it.chatTitle : "", what, fmtDate(it.date)].filter(Boolean).join(" · ");
+        /* 搜索结果、播放记录：写是哪个群的；播放记录的日期是放的那天 */
+        var mixedSrc = S.src && (S.src.kind === "search" || S.src.kind === "history");
+        var meta = [mixedSrc ? it.chatTitle : "", what, fmtDate(it.playedAt ? new Date(it.playedAt) : it.date)].filter(Boolean).join(" · ");
         var now = mu && S.mu.item && S.mu.item.fileKey === it.fileKey;
         if (p && p.done) { meta = T("看完了 · {0}", meta); }
         else if (p && p.t > 0) { meta = T("看到 {0} · {1}", fmtTime(p.t), meta); }
@@ -1021,6 +1064,7 @@
 
     /* opts.reopen：同一部片在当前位置重开（换音轨），字幕、菜单的状态留着 */
     async function play(it, opts) {
+        if (!opts || !opts.reopen) { remember(it); }
         if (it.kind === "music") { playMusic(it); return; }
         if (music.current()) { stopMusic("放视频"); }
         opts = opts || {};

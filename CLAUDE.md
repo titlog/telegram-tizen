@@ -74,7 +74,7 @@ zsh tools/deploy.sh --music                      # 音乐在电视上走一遍�
 node ../bilibili-tizen/tools/diag-logs.mjs --app telegram-tizen   # 读别人电视传上来的（--device 编号 / <id>）
 zsh tools/release.sh                             # 发布包 → dist/telegram-tizen-<版本>.wgt
 node test/serve.mjs & node test/run.mjs media/a_h264_fast.mp4 "media/b_h264_moovend.mp4?start=30"   # 改 player.js 之后
-node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv / acct / music 只跑那一段，UILANG=en 英文界面）
+node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv / acct / music / history 只跑那一段，UILANG=en 英文界面）
 ```
 **自测构建（--diag / --loginexpiry / --samples / --music）测完马上 `zsh tools/deploy.sh` 装回正常构建。**
 
@@ -111,7 +111,7 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
 - [MKV-字幕-音轨.md](docs/MKV-字幕-音轨.md) — 当文件发的视频、MKV、换音轨、字幕、长按菜单、下一集、搜索
 - [网页链接.md](docs/网页链接.md) — 站点规则、隐藏框、Cloudflare、列表当来源、archive.org、`video.src` 放不了网上的 MP4
 - [音乐.md](docs/音乐.md) — 音乐模式、电视能放哪些音频格式（实测表）、FLAC 软件解码
-- [界面.md](docs/界面.md) — 用户在电视上边用边提的要求、封面、中英双语
+- [界面.md](docs/界面.md) — 用户在电视上边用边提的要求、封面、中英双语、播放记录
 - [多账号.md](docs/多账号.md) — 每人一个会话库、切换、退出、扫码页上挂到后台
 - [发布包与API-ID.md](docs/发布包与API-ID.md) — 发布包带哪组 API ID、打乱、被拒在哪一步、填写页
 - [自动更新与诊断日志.md](docs/自动更新与诊断日志.md) — 签名更新包、壳、诊断日志传什么、什么时候传

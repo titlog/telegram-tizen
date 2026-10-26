@@ -154,6 +154,19 @@ var Store = (function () {
         }).catch(function () {});
     }
 
+    /* 播放记录（来源栏的「播放记录」，用户 2026-10-26：「方便找」）：每人一份，最近的在前，最多 200 条。只存找回它要的东西 ——
+     * 哪个会话的第几条消息（mtcute 的文档对象存不进 localStorage，打开时再向 Telegram 取）；网页链接存地址、标题、站名。
+     * {k: fileKey, kind: "video" | "music" | "web", chat, msg, url, site, title, image, at} */
+    var HKEY = mine("tg.history.v1"), hist = read(HKEY, []);
+    function addHistory(h) {
+        hist = hist.filter(function (x) { return x.k !== h.k; });
+        hist.unshift(h);
+        if (hist.length > 200) { hist.length = 200; }
+        write(HKEY, hist);
+    }
+    function history() { return hist.slice(); }
+    function clearHistory() { hist = []; write(HKEY, hist); }
+
     function getMoov(key) { return get("moov", key); }
     /* MP4：{start, bytes}（moov 原样）；MKV：{mkv: info}（mkv.js 解析好的头 + Cues，结构化克隆存进去） */
     function putMoov(key, m) { return put("moov", key, m.mkv ? { mkv: m.mkv } : { start: m.start, bytes: m.bytes }, 12); }
@@ -165,5 +178,5 @@ var Store = (function () {
         return put("cover", key, v, 800);    // 缩略图 20–40KB，800 张 ~30MB
     }
 
-    return { setProgress: setProgress, getProgress: getProgress, srcCount: srcCount, setSrcCount: setSrcCount, noPoster: noPoster, markNoPoster: markNoPoster, noFrame: noFrame, markNoFrame: markNoFrame, lastSource: lastSource, setLastSource: setLastSource, once: once, getPrefs: getPrefs, setPrefs: setPrefs, dur: dur, setDur: setDur, searches: searches, addSearch: addSearch, webSources: webSources, setWebSources: setWebSources, webSourceGroups: webSourceGroups, getMoov: getMoov, putMoov: putMoov, getCover: getCover, putCover: putCover };
+    return { setProgress: setProgress, getProgress: getProgress, srcCount: srcCount, setSrcCount: setSrcCount, noPoster: noPoster, markNoPoster: markNoPoster, noFrame: noFrame, markNoFrame: markNoFrame, lastSource: lastSource, setLastSource: setLastSource, once: once, getPrefs: getPrefs, setPrefs: setPrefs, dur: dur, setDur: setDur, searches: searches, addSearch: addSearch, webSources: webSources, setWebSources: setWebSources, webSourceGroups: webSourceGroups, addHistory: addHistory, history: history, clearHistory: clearHistory, getMoov: getMoov, putMoov: putMoov, getCover: getCover, putCover: putCover };
 })();
