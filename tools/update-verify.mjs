@@ -44,7 +44,10 @@ try {
 } catch (e) { pubOk = false; }
 ok(pubOk, "PUBKEY 是 P-256 的 SPKI" + (pubOk ? "（指纹 " + describePublic(Buffer.from(boot.pubkey, "base64")).fp + "）" : ""));
 ok(boot.scripts.every((f) => PACKAGED.includes(f) || fs.existsSync(path.join(ROOT, "app/js", f))), "SCRIPTS 里的文件都在（tg.bundle.js 是现打的、sites.local.js 只在本机，可以没有）");
-ok(PACKAGED.every((f) => boot.scripts.includes(f)), "只从安装包读的 " + PACKAGED.join("、") + " 都在 SCRIPTS 里");
+/* tg.legacy.js 不在 SCRIPTS 里：没有 BigInt 的引擎上 boot.js 把 tg.bundle.js 换成它（pkg()） */
+const bootText = fs.readFileSync(path.join(ROOT, "app/js/boot.js"), "utf8");
+ok(PACKAGED.every((f) => boot.scripts.includes(f) || (f === "tg.legacy.js" && /"tg\.bundle\.js" && LEGACY \? "tg\.legacy\.js"/.test(bootText))),
+   "只从安装包读的 " + PACKAGED.join("、") + " 都在 SCRIPTS 里（tg.legacy.js 由 boot.js 换 tg.bundle.js）");
 const shellsFile = path.join(ROOT, "update/shell.json");
 const shells = fs.existsSync(shellsFile) ? JSON.parse(fs.readFileSync(shellsFile, "utf8")) : {};
 const printNow = vendorPrint((p) => fs.readFileSync(path.join(ROOT, p), "utf8"));

@@ -94,7 +94,7 @@
             bootFail(T("连不上 Telegram"), esc(errStr(e)) + "<br>" + T("检查网络后按确认重试"));
             return;
         }
-        R("连上 Telegram " + Math.round(performance.now() - t0) + "ms，mtcute 在 " + TG.mode() + "；界面 " + I18n.lang + "（" + I18n.why + "，系统语言 " + I18n.sys + "）" +
+        R("连上 Telegram " + Math.round(performance.now() - t0) + "ms，mtcute 在 " + TG.mode() + (Boot.info().mtcute === "legacy" ? "（老电视那份：大数用 JSBI）" : "") + "；界面 " + I18n.lang + "（" + I18n.why + "，系统语言 " + I18n.sys + "）" +
           "；API ID 是" + (api.from === "build" ? "安装包里带的" : "电视上填的"));
         var acct = Accounts.active(), me = await TG.me();
         if (!me) {

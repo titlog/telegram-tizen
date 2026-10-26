@@ -124,7 +124,7 @@ All of these can be shared legally, and between them they exercise the main feat
 | | |
 |---|---|
 | **Tested** | Samsung 2023 65" **CU7090**, firmware Tizen 9.0 (Chromium 120) |
-| **Minimum** | Tizen 5.5 (roughly 2020 models onwards; before 1.2.0 it needed 6.0). Tizen 5.0 and older cannot run it: the Telegram client library needs BigInt, which that browser (Chromium 63) lacks |
+| **Minimum** | Tizen 5.0 (roughly 2019 models onwards). On Tizen 5.0 the app uses a separate build of the Telegram client library, because that browser lacks BigInt (big numbers are done in plain JavaScript instead); it hasn't been tried on a real 5.0 TV yet, and the first sign-in is slower. Tizen 4.0 and older can't install it |
 | **Other models** | Untested. Whether it works or not, please open an issue with your model and firmware version (Settings → Support → About This TV) |
 
 Download speed is Telegram's, not your connection's: without Premium the TV measured a steady 1.7–2.3 MB/s, about

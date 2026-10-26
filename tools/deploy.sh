@@ -11,6 +11,7 @@
 #   zsh tools/deploy.sh --samples  README「拿什么试」那几部片在电视上走一遍：archive.org 的片子页（解析、1080p 连放、快进），
 #                                  Sintel 官方 MKV（AC-3 5.1、10 条字幕、GBK 中文外挂、长按菜单换字幕、快进），从网上直接读（js/selftest.js，3 分钟）
 #   zsh tools/deploy.sh --music    电视怎么放音频文件（MP3 / M4A / FLAC / Opus / WAV，blob 和 http 两种放法）；先开 RATE=0 LAT=0 node test/serve.mjs
+#   zsh tools/deploy.sh --legacy   在这台（有 BigInt 的）电视上强制用老电视那份 mtcute（tg.legacy.js），连 Telegram、取片子、下载放几秒；测完自己换回
 #   TG_UPDATE_MANIFEST=http://<这台电脑>:<端口>/manifest.json zsh tools/deploy.sh   在电视上测自动更新（只有开发构建认它）
 set -e
 NOAPI=""
@@ -22,6 +23,7 @@ for a in "$@"; do
     --loginexpiry) SELFTEST="loginexpiry" ;;
     --samples) SELFTEST="samples" ;;
     --music) SELFTEST="music" ;;
+    --legacy) SELFTEST="legacy" ;;
   esac
 done
 
@@ -55,6 +57,8 @@ for f in "$APP"/js/*.js; do node --check "$f" >/dev/null || { echo "  syntax err
 # node 什么都认；required_version 那代电视（Tizen 6.0 = Chromium 76）不认的写法在这里拦（1.1.2 就是这样在那几台上打不开的）
 node "$ROOT/tools/syntax-verify.mjs" || { echo "  refuse to deploy"; exit 1; }
 node "$ROOT/test/compat.mjs" >/dev/null || { node "$ROOT/test/compat.mjs"; echo "  refuse to deploy"; exit 1; }
+# 老电视那份（tg.legacy.js）的 JSBI 大数函数对着原生 BigInt 对拍
+node "$ROOT/test/legacy-bigint.mjs" >/dev/null || { node "$ROOT/test/legacy-bigint.mjs"; echo "  refuse to deploy"; exit 1; }
 # 自动更新（钥匙、版本号、boot.js 每种本地状态下选对代码、mtcute / hls.js 换了 SHELL 有没有加一）、诊断日志（去隐私、什么时候传）
 for t in tools/update-verify.mjs tools/diag-verify.mjs; do
   node "$ROOT/$t" >/dev/null || { node "$ROOT/$t" | grep '✗'; echo "  refuse to deploy"; exit 1; }

@@ -66,8 +66,13 @@ function walk(node, parent, visit) {
   }
 }
 
+/* mtcute 正常那份（tg.bundle.js 和它的后台线程文本）只在有 BigInt 的引擎上加载（boot.js；BigInt 是 Chromium 67 起），按 Tizen 5.5
+ * （Chromium 69）打、按它查；没有 BigInt 的（Tizen 5.0）加载 tg.legacy.js，和别的脚本一样按 required_version 那代查（2026-10-26） */
+const MODERN = /(^|[\/\\])(tg\.bundle\.js|worker\.bundle\.txt)$/;
+const engineFor = (file) => (MODERN.test(file) ? Math.max(ENGINE, TIZEN_CHROMIUM["5.5"]) : ENGINE);
+
 function check(file) {
-  const src = fs.readFileSync(file, "utf8");
+  const src = fs.readFileSync(file, "utf8"), ENGINE = engineFor(file);
   const name = path.relative(ROOT, file) || file;
   let ast;
   try { ast = acorn.parse(src, { ecmaVersion: "latest", sourceType: "script", allowHashBang: true, locations: true }); }
@@ -92,7 +97,7 @@ let files = process.argv.slice(2);
 if (!files.length) {
   const js = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
     d.isDirectory() ? js(path.join(dir, d.name)) : d.name.endsWith(".js") ? [path.join(dir, d.name)] : []);
-  files = [...js(path.join(ROOT, "app/js")), path.join(ROOT, "build/out/worker.bundle.txt")];
+  files = [...js(path.join(ROOT, "app/js")), path.join(ROOT, "build/out/worker.bundle.txt"), path.join(ROOT, "build/out/worker.legacy.txt")];
 }
 const missing = files.filter((f) => !fs.existsSync(f));
 if (missing.length) { console.log("✗ 没有这些文件（先打包）：" + missing.join("、")); process.exit(1); }
@@ -102,4 +107,5 @@ if (problems.length) {
   for (const p of problems) console.log("    " + p);
   process.exit(1);
 }
-console.log(`✓ ${files.length} 个脚本在 Tizen ${required}（Chromium ${ENGINE}）上解析得了`);
+const modern = files.filter((f) => MODERN.test(f) && engineFor(f) !== ENGINE).length;
+console.log(`✓ ${files.length} 个脚本在 Tizen ${required}（Chromium ${ENGINE}）上解析得了` + (modern ? `（其中 ${modern} 个是有 BigInt 的引擎才加载的 mtcute 正常那份，按 Chromium ${TIZEN_CHROMIUM["5.5"]} 查）` : ""));

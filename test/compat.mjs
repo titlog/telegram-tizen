@@ -95,5 +95,37 @@ vm.runInContext("setTimeout(() => __push('timeout')); queueMicrotask(() => __pus
 await new Promise((ok) => setTimeout(ok, 20));
 assert.deepEqual(order, [1, 2, "timeout"]);
 
+/* ---------- Chromium 63（Tizen 5.0）：build/legacy/prelude63.js 补的 AbortController、trimStart / trimEnd、DataView 读写 64 位（JSBI），
+ * 再叠上 compat.js 的 reason / throwIfAborted / any —— 老电视那份包（tg.legacy.js）就是这个顺序 ---------- */
+{
+  const { createRequire } = await import("node:module");
+  const req = createRequire(new URL("../build/package.json", import.meta.url));
+  const jsbi = fs.readFileSync(req.resolve("jsbi/dist/jsbi-umd.js"), "utf8");
+  const pre = fs.readFileSync(new URL("../build/legacy/prelude63.js", import.meta.url), "utf8");
+  const c63 = vm.createContext({ DOMException, setTimeout, TextDecoder, Uint8Array, ArrayBuffer });
+  vm.runInContext(`this.self = this; delete String.prototype.trimStart; delete String.prototype.trimEnd;
+    delete DataView.prototype.getBigUint64; delete DataView.prototype.getBigInt64; delete DataView.prototype.setBigUint64; delete DataView.prototype.setBigInt64;`, c63);
+  assert.equal(vm.runInContext("typeof AbortController", c63), "undefined");
+  vm.runInContext(jsbi + "\n" + pre + "\n" + src, c63, { filename: "jsbi+prelude63+compat.js" });
+  const r = JSON.parse(vm.runInContext(`(() => {
+    const out = {}, c = new AbortController(), seen = [];
+    c.signal.addEventListener("abort", () => seen.push("a"));
+    c.signal.addEventListener("abort", () => seen.push("once"), { once: true });
+    c.signal.onabort = () => seen.push("on");
+    out.before = c.signal.aborted; c.abort("why"); c.abort("again");
+    out.after = c.signal.aborted; out.reason = c.signal.reason; out.seen = seen.join(",");
+    try { c.signal.throwIfAborted(); out.threw = false; } catch (e) { out.threw = e; }
+    const a = new AbortController(), b = new AbortController(), any = AbortSignal.any([a.signal, b.signal]);
+    b.abort("b"); out.any = any.aborted + "/" + any.reason;
+    const d = new AbortController(); d.abort(); out.defReason = d.signal.reason.name;
+    out.trim = "  x ".trimStart() + "|" + "  x ".trimEnd() + "|";
+    const dv = new DataView(new ArrayBuffer(8)); dv.setBigUint64(0, JSBI.BigInt("0x0102030405060708"));
+    out.u64 = dv.getBigUint64(0).toString(16) + " " + Array.from(new Uint8Array(dv.buffer)).join(",");
+    dv.setBigInt64(0, JSBI.BigInt(-2), true); out.i64 = dv.getBigInt64(0, true).toString();
+    return JSON.stringify(out); })()`, c63));
+  assert.deepEqual(r, { before: false, after: true, reason: "why", seen: "on,a,once", threw: "why", any: "true/b", defReason: "AbortError",
+    trim: "x |  x|", u64: "102030405060708 1,2,3,4,5,6,7,8", i64: "-2" });
+}
+
 console.log("✓ compat.js：reason、throwIfAborted、AbortSignal.any 在 Chromium 76 那样的引擎上补对了；globalThis、fromEntries、queueMicrotask、" +
-  "encodeInto、Symbol.description 在 Chromium 69 那样的引擎上补对了；新引擎上不动");
+  "encodeInto、Symbol.description 在 Chromium 69 那样的引擎上补对了；prelude63.js 的 AbortController、trimStart / trimEnd、DataView 64 位在 Chromium 63 那样的引擎上补对了；新引擎上不动");

@@ -113,6 +113,12 @@ var Boot = (function () {
 
     function tag(src) { document.write('<script src="' + src + '"><\/script>'); }
 
+    /* mtcute 有两份：正常的（tg.bundle.js）要 BigInt；没有 BigInt 的引擎（Tizen 5.0 = Chromium 63）换成 tg.legacy.js —— 大数换成了
+     * JSBI、补了 Chromium 63 缺的 API（build/legacy/）。都只在安装包里（不随更新下发），更新包的脚本清单里写的还是 tg.bundle.js */
+    var LEGACY = typeof BigInt === "undefined" || get("tg.mtcute.v1") === "legacy";      // 后一个：在新电视上测老电视那份（deploy.sh --legacy）
+    info.mtcute = LEGACY ? "legacy" : "modern";
+    function pkg(name) { return name === "tg.bundle.js" && LEGACY ? "tg.legacy.js" : name; }
+
     function blobUrl(text, type) {
         return URL.createObjectURL(new Blob([text], { type: type }));
     }
@@ -122,7 +128,7 @@ var Boot = (function () {
         var urls = [], sheets = [];
         for (var i = 0; i < b.scripts.length; i++) {
             var name = b.scripts[i], text = b.files["js/" + name];
-            var u = text != null ? blobUrl(text, "application/javascript") : "js/" + name;
+            var u = text != null ? blobUrl(text, "application/javascript") : "js/" + pkg(name);
             names[u] = name;
             urls.push(u);
         }
@@ -156,7 +162,7 @@ var Boot = (function () {
 
     function packaged() {
         info.running = info.packaged;
-        for (var i = 0; i < SCRIPTS.length; i++) { tag("js/" + SCRIPTS[i]); }
+        for (var i = 0; i < SCRIPTS.length; i++) { tag("js/" + pkg(SCRIPTS[i])); }
     }
 
     if (typeof document !== "undefined" && document.write) {
@@ -185,7 +191,7 @@ var Boot = (function () {
         keys: { bundle: K_BUNDLE, meta: K_META, booting: K_BOOTING, bad: K_BAD },
         isBad: function (version) { return !!badList()[version]; },
         /* {packaged, running, note}：这次选了什么、为什么。 */
-        info: function () { return { packaged: info.packaged, running: info.running, note: info.note }; },
+        info: function () { return { packaged: info.packaged, running: info.running, note: info.note, mtcute: info.mtcute }; },
         /* 应用起来了：这次启动的代码是好的。 */
         ok: function () { del(K_BOOTING); },
         /* 更新包的脚本在 onerror 里是 blob: 地址，一串 uuid 说不出是哪个文件；这里换回文件名。 */

@@ -31,7 +31,8 @@ app/js/sites.local.js  站点规则（Web.register），本机自己写，不进
 app/js/store.js   本地：看到哪里（localStorage，按账号分开）、上次的来源、moov 缓存（IndexedDB，留 12 个，整台电视共用）
 build/src/        mtcute 打包：worker.js（后台线程里的客户端）先打成文本，嵌进 entry.js（主线程的端口 + 二维码）
 build/src/compat.js  mtcute 用到、Chromium 69 没有的 API，entry、worker 第一个 import 它
-build/bundle.sh   打 mtcute 的包（deploy / release 共用）：esbuild 的 target 跟着 required_version 走（5.5 = chrome69）；mtcute 的 wasm 用 binaryen 降成 MVP
+build/bundle.sh   打 mtcute 的包（deploy / release 共用）：正常那份 chrome69、wasm 用 binaryen 降成 MVP；再打老电视那份 tg.legacy.js
+build/legacy/     老电视（没有 BigInt，Tizen 5.0 = Chromium 63）那份 mtcute：大数换 JSBI（jsbi-bigint.js 整个换、patches.mjs 按行改）、prelude63.js 补 API
 tools/syntax-verify.mjs  包里每个脚本（含后台线程那份文本）对着 required_version 那代引擎查语法（deploy / release 卡着）
 tools/deploy.sh   打包、写入上报地址和凭证、签名、安装、启动；打完包把凭证改回空值（--noapi 不写凭证，测填写页）
 tools/update-*.mjs  自动更新：update-key（钥匙，只跑一次）、update-release（打包签名 → update/）、update-verify（离线验证，deploy / release 卡着）
@@ -42,6 +43,7 @@ test/check.mjs    mp4.js 离线校验（对照 ffprobe，拼出来的 fMP4 交�
 test/compat.mjs   compat.js 在没有那些 API 的假引擎上补得对不对（deploy / release 卡着）
 test/check-mkv.mjs  mkv.js 离线校验（测试片 test/media/mkv/，生成命令在文件头；要 ffmpeg + mkvtoolnix）
 test/check-flac.mjs flac.js 离线校验（13 种 FLAC，PCM 和 ffmpeg 逐字节比）
+test/legacy-bigint.mjs  build/legacy/jsbi-bigint.js 对着原生 BigInt 随机对拍（deploy / release 卡着）
 test/check-subs.mjs subs.js 校验（编码、格式、tx3g、MKV 块；PGS 和 ffmpeg 的渲染逐像素比）
 test/i18n.mjs     界面每句话都有英文、占位符对得上；app.js 里往屏幕上写的地方没有漏套 T
 test/apikey.mjs   API ID 从哪来、填写页：没带 / 带的被拒 / 打乱过的 / 能用，键盘真敲进输入框（假 Telegram 层，截图 logs/api-*.png）
@@ -70,6 +72,7 @@ node test/apikey.mjs                             # 改 apikey.js、填写页、�
 zsh tools/deploy.sh --diag                       # 诊断日志在电视上走一遍（7 步，1 分钟）；先开 PORT=8096 node ../bilibili-tizen/tools/diag-local.mjs
 zsh tools/deploy.sh --loginexpiry                # 扫码页上后台线程的连接作废，看是不是重连、换码（3 步，2 分钟；会添加一个账号再取消）
 zsh tools/deploy.sh --samples                    # README「拿什么试」那几部片在电视上走一遍：archive.org 解析 + 1080p 连放 + 快进，Sintel MKV + 字幕（16 步，2 分钟）
+zsh tools/deploy.sh --legacy                     # 在这台（有 BigInt 的）电视上强制用老电视那份 mtcute：正常那份、老那份各放同一部片子对照
 zsh tools/deploy.sh --music                      # 音乐在电视上走一遍：MP3 → FLAC（软件解）→ M4A，换歌、快进、返回接着放（7 步）；先开 RATE=0 LAT=0 node test/serve.mjs
 node ../bilibili-tizen/tools/diag-logs.mjs --app telegram-tizen   # 读别人电视传上来的（--device 编号 / <id>）
 zsh tools/release.sh                             # 发布包 → dist/telegram-tizen-<版本>.wgt
@@ -83,8 +86,9 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
 - **电视上的事只能看日志**（`tizen debug` 打不开）；桌面上测过不等于电视上好，用自测构建在电视上走一遍。
   **卸电视上的应用之前先列出来、对照各项目的 config.xml、问用户**（哔哩哔哩客户端的编号是 `BiliTvApp0.Bilibili`，被当成探测版卸过一次）。
   部署前 sdb 通道可能卡死，deploy.sh 会先试 `shell echo`。
-- **最低 Tizen 5.5（Chromium 69）**：语法靠 esbuild 的 target 降，API 补在 compat.js，mtcute 的 wasm 用 binaryen 降成 MVP；
-  syntax-verify / compat.mjs 卡着。5.0 做不了（mtcute 要 BigInt）。→ [docs/老电视兼容.md](docs/老电视兼容.md)
+- **最低 Tizen 5.0（Chromium 63）**：mtcute 两份，boot.js 看 `typeof BigInt` 挑 —— 正常的 `tg.bundle.js`（chrome69，wasm 降成 MVP，API 补在
+  compat.js），没有 BigInt 的用 `tg.legacy.js`（大数换 JSBI，`build/legacy/`）。我们自己的代码按 63 写（syntax-verify 卡着；正则别用 `\p{}`、
+  具名分组）。改了 mtcute 的版本，`build/legacy/patches.mjs` 会对不上、构建停下来，要重新对。→ [docs/老电视兼容.md](docs/老电视兼容.md)
 - **mtcute 在后台线程**；给它 wasm 先 `WebAssembly.compile`；下载没背压，靠 `throttle` 钩子；起点按 512KB 对齐；挂到后台一分钟以上连接作废，
   要重连。→ [docs/播放引擎.md](docs/播放引擎.md)
 - **播放引擎**：自己写的 MP4 / MKV 解析 + MSE；按秒背压；音视频隔得远就分两路读；**三星的 MSE 不跨空档**，起点要落在音视频都有的地方；
@@ -102,7 +106,7 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
   的指纹（1.1.3、1.2.0 都是这样）。→ [docs/自动更新与诊断日志.md](docs/自动更新与诊断日志.md)
 - **多账号**：本地记录用 `Accounts.scope()`，认人看用户编号。→ [docs/多账号.md](docs/多账号.md)
 - **README.md 是英文**（GitHub 默认展示），中文在 README.zh.md；截图两套。→ [docs/README截图.md](docs/README截图.md)
-- **电视上还没验证**：Tizen 5.5 / 6.x 真机；AC-3 有没有声音；换音轨重开停在原处；真遥控器的长按；下一集倒计时；切换界面语言；
+- **电视上还没验证**：Tizen 5.0 / 5.5 / 6.x 真机；AC-3 有没有声音；换音轨重开停在原处；真遥控器的长按；下一集倒计时；切换界面语言；
   添加 / 切换 / 退出账号；在电视上用遥控器填 API ID。看到这些的日志再划掉。
 
 ## 专题（docs/）
@@ -115,7 +119,7 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
 - [多账号.md](docs/多账号.md) — 每人一个会话库、切换、退出、扫码页上挂到后台
 - [发布包与API-ID.md](docs/发布包与API-ID.md) — 发布包带哪组 API ID、打乱、被拒在哪一步、填写页
 - [自动更新与诊断日志.md](docs/自动更新与诊断日志.md) — 签名更新包、壳、诊断日志传什么、什么时候传
-- [老电视兼容.md](docs/老电视兼容.md) — Tizen 6.0 打不开（1.1.2）、Tizen 5.5 支持（1.2.0）
+- [老电视兼容.md](docs/老电视兼容.md) — Tizen 6.0 打不开（1.1.2）、Tizen 5.5 支持（1.2.0）、Tizen 5.0：没有 BigInt 的那份 mtcute（1.2.2）
 - [README截图.md](docs/README截图.md) — README 截图怎么拍、片子的版权、截片段的坑
 
 ## 发一版

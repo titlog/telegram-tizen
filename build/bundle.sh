@@ -2,7 +2,8 @@
 # mtcute 打包，deploy.sh 和 release.sh 共用：zsh build/bundle.sh <输出的 tg.bundle.js>
 # 两步：后台线程那份（src/worker.js）先打成文本 out/worker.bundle.txt，再作为字符串嵌进主线程那份（src/entry.js）。
 #
-# TARGET 要跟着 app/config.xml 的 required_version 走（Tizen 5.5 = Chromium 69；1.1.3–1.1.7 是 6.0 = 76）。1.1.2 以前打的是 chrome120：
+# 这份（正常那份）只在有 BigInt 的引擎上用，TARGET 是 Tizen 5.5 = Chromium 69（1.1.3–1.1.7 是 6.0 = 76）；required_version 是 5.0，
+# 没有 BigInt 的 5.0 用最后打的 tg.legacy.js（chrome63）。1.1.2 以前打的是 chrome120：
 # 2026-10-22 两台 Tizen 6.0 的电视每次启动都是「Unexpected token (」（@fuman/utils 里的私有方法，Chromium 84 才认），
 # TGLib 没定义，整个应用打不开。tools/syntax-verify.mjs 拿打出来的两份对着 required_version 那代引擎查，deploy / release 卡着。
 #
@@ -27,3 +28,5 @@ npx esbuild src/worker.js --bundle --format=iife --target=$TARGET --loader:.wasm
   --minify --legal-comments=none --log-level=warning --outfile=out/worker.bundle.txt
 npx esbuild src/entry.js --bundle --format=iife --target=$TARGET --loader:.wasm=binary --loader:.txt=text \
   --minify --legal-comments=none --log-level=warning --outfile="$OUT"
+# 没有 BigInt 的引擎（Tizen 5.0 = Chromium 63）用的那份，放在旁边（boot.js 看 typeof BigInt 挑）：大数换成 JSBI，见 legacy/build-legacy.mjs
+node legacy/build-legacy.mjs "${OUT:h}/tg.legacy.js"

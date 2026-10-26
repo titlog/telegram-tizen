@@ -7,7 +7,7 @@
 
     <tizen:application id="TgTvVideo0.TgVideo"
                        package="TgTvVideo0"
-                       required_version="5.5"/>
+                       required_version="5.0"/>
 
     <access origin="*" subdomains="true"/>
     <!-- 刻意不写 <tizen:allow-navigation> 和任何 <tizen:content-security-policy*>：写了任何一个，应用就进

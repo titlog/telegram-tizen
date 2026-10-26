@@ -194,7 +194,13 @@ var Cover = (function () {
      * （简介转成简体，常写「…译作《黑鹰坠落》」—— 词条标题是另一个译名「黑鷹計劃」也认得出）；标题里有片名的优先于只在简介里提到的
      * （「让子弹飞」不然会配成演员周韵）。第一版只看搜索排名，2026 年的新片维基上没有，配成了人物、别的片子、电视剧。宁可不配。 */
     var FILM = /电影|電影|影片|动画|[剧喜动作爱情恐怖科幻战争犯罪纪录史诗传记惊悚悬疑灾难歌舞]片|\bfilm\b|\bmovie\b/i;
-    function norm(s) { return s.replace(/[\s\p{P}\p{S}_]+/gu, "").toLowerCase(); }
+    /* 去掉空白、标点、符号再比。\p{P}\p{S} 是 Chromium 64 起才认的写法，Tizen 5.0（63）的引擎连正则字面量都解析不了、整个脚本跑不起来：
+     * 运行时构造，构造不了就退回常见标点、符号的区间（ASCII、拉丁补充、通用标点、中日韩标点、全角） */
+    var PUNCT = (function () {
+        try { return new RegExp("[\\s\\p{P}\\p{S}_]+", "gu"); }
+        catch (e) { return /[\s!-\/:-@\[-`{-~\u00a1-\u00bf\u00d7\u00f7\u2000-\u206f\u2190-\u2bff\u3000-\u303f\uff01-\uff0f\uff1a-\uff20\uff3b-\uff40\uff5b-\uff65]+/g; }
+    })();
+    function norm(s) { return s.replace(PUNCT, "").toLowerCase(); }
 
     async function wikiPoster(item) {
         var t = item.title.replace(NOISE, " ").replace(/[\[\]【】()（）《》]/g, " ").replace(/\b(19|20)\d\d\b/g, " ");

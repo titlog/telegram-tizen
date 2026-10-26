@@ -122,10 +122,11 @@ if (g.from !== "build" || String(g.id) !== process.env.TG_ID || g.hash !== proce
 # 和 deploy.sh 同一个脚本（build/ 上面已经确认和 HEAD 一致）
 zsh "$ROOT/build/bundle.sh" "$STAGE/app/js/tg.bundle.js"
 node --check "$STAGE/app/js/tg.bundle.js" >/dev/null || { echo "  tg.bundle.js 打出来不能解析"; exit 1; }
-# 包里每个脚本，对着 required_version 那代电视的引擎查（Tizen 6.0 = Chromium 76）
+# 包里每个脚本，对着 required_version 那代电视的引擎查（Tizen 5.0 = Chromium 63；mtcute 正常那份只在有 BigInt 的引擎上用，按 5.5 = 69 查）
 JS=("$STAGE"/app/js/**/*.js(N))
-node "$ROOT/tools/syntax-verify.mjs" "${JS[@]}" "$ROOT/build/out/worker.bundle.txt" || { echo "  refuse to release"; exit 1; }
+node "$ROOT/tools/syntax-verify.mjs" "${JS[@]}" "$ROOT/build/out/worker.bundle.txt" "$ROOT/build/out/worker.legacy.txt" || { echo "  refuse to release"; exit 1; }
 node "$ROOT/test/compat.mjs" >/dev/null || { node "$ROOT/test/compat.mjs"; echo "  refuse to release"; exit 1; }
+node "$ROOT/test/legacy-bigint.mjs" >/dev/null || { node "$ROOT/test/legacy-bigint.mjs"; echo "  refuse to release"; exit 1; }
 
 echo "== packaging =="
 tizen package -t wgt -s "$PROFILE" -- "$STAGE/app" 2>&1 | grep -E "Package File Location|error" || true

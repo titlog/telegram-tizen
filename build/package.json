@@ -1,1 +1,1 @@
-{"name":"telegram-tizen-build","private":true,"type":"module","dependencies":{"@mtcute/web":"^0.32.3","esbuild":"^0.28.2","qrcode-generator":"^2.0.4"},"devDependencies":{"acorn":"^8.19.0","binaryen":"123.0.0"}}
+{"name":"telegram-tizen-build","private":true,"type":"module","dependencies":{"@mtcute/web":"^0.32.3","esbuild":"^0.28.2","qrcode-generator":"^2.0.4"},"devDependencies":{"@babel/core":"7.26.0","acorn":"^8.19.0","babel-plugin-transform-bigint":"1.0.34","binaryen":"123.0.0","bn.js":"5.2.1","jsbi":"4.3.2"}}

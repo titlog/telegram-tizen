@@ -11,7 +11,7 @@
  * 派发和遥控器一样的 keydown。最后一行 SELFTEST: 结束，全部通过 / N 步失败。⚠️ 测完马上 zsh tools/deploy.sh 装回正常构建。 */
 (function () {
     "use strict";
-    if (typeof SELFTEST === "undefined" || ["diag", "loginexpiry", "samples", "music"].indexOf(SELFTEST) < 0) { return; }
+    if (typeof SELFTEST === "undefined" || ["diag", "loginexpiry", "samples", "music", "legacy"].indexOf(SELFTEST) < 0) { return; }
 
     var fails = 0, steps = 0;
     function R(s) { Log.report("SELFTEST", s); }
@@ -376,5 +376,59 @@
         R(fails ? "结束，" + fails + "/" + steps + " 步失败" : "结束，全部通过（" + steps + " 步）");
     }
 
-    setTimeout(SELFTEST === "diag" ? diagRun : SELFTEST === "samples" ? samplesRun : SELFTEST === "music" ? musicRun : loginExpiryRun, 500);
+    /* --legacy：在这台（有 BigInt 的）电视上强制加载老电视那份 mtcute（tg.legacy.js：大数换成 JSBI、语法降到 Chromium 63，
+     * build/legacy/），走一遍真的流程：连 Telegram、认人、取上次那个来源的片子、用单独的播放器下载并放几秒（不进观看进度、不进播放记录）。
+     * 第一段设标记、重新加载（boot.js 读 tg.mtcute.v1），第二段测，最后去掉标记再重新加载回正常那份。 */
+    var LKEY = "tg.mtcute.v1";
+    /* 用单独的播放器、单独的 video 放上次那个来源里的一部（20MB–2GB 里的第一部，两段挑的是同一部），不碰应用的播放器、观看进度、播放记录 */
+    async function playCheck(label) {
+        var src = Store.lastSource();
+        if (!src || src.kind === "web") { R("没有上次的群，不测播放"); return; }
+        var t0 = Date.now(), page = await TG.videos(src.id, undefined, 40);
+        var it = page.items.filter(function (x) { return x.kind !== "music" && x.kind !== "web" && x.size > 20 * 1048576 && x.size < 2048 * 1048576; })[0];
+        check(label + "：取片子", !!it, page.items.length + " 个，" + (Date.now() - t0) + "ms");
+        if (!it) { return; }
+        var v = document.createElement("video");
+        v.muted = true;
+        v.style.cssText = "position:absolute;left:0;top:0;width:320px;height:180px;z-index:99";
+        document.body.appendChild(v);
+        var p = Player.create(v, function (s) { R("（" + label + "）" + s); }, function () {});
+        t0 = Date.now();
+        var opened = await Promise.race([p.open(TG.source(it), { startAt: 0 }).then(function () { return true; }, function (e) { return "出错：" + (e && e.message); }),
+                                         wait(60000).then(function () { return "60 秒没出画面"; })]);
+        var ok = opened === true && await until(function () { return v.currentTime > 3 ? true : null; }, 20000);
+        check(label + "：下载并放 3 秒（" + (it.asFile ? "文件" : "视频") + " " + Math.round(it.size / 1048576) + "MB）", !!ok,
+              (Date.now() - t0) + "ms，" + (opened === true ? "t=" + v.currentTime.toFixed(1) + "，" + v.videoWidth + "x" + v.videoHeight : opened));
+        try { p.close(); } catch (e) {}
+        v.remove();
+    }
+    async function legacyRun() {
+        if (localStorage.getItem(LKEY) !== "legacy") {
+            if (localStorage.getItem("tg.selftest.legacyDone")) { localStorage.removeItem("tg.selftest.legacyDone"); R("测完了，这是装回正常那份的重新加载。装回正常构建：zsh tools/deploy.sh"); return; }
+            R("第一段：正常那份（mtcute = " + Boot.info().mtcute + "）放一部，作对照");
+            await until(function () { return window.__app.screen() === "home" ? true : null; }, 90000);
+            try { await playCheck("正常那份"); } catch (e) { R("第一段中止：" + (e && e.message)); }
+            R("设标记，重新加载成老电视那份");
+            localStorage.setItem(LKEY, "legacy");
+            setTimeout(function () { location.reload(); }, 1000);
+            return;
+        }
+        R("第二段（mtcute = " + Boot.info().mtcute + "，BigInt 在这台电视上" + (typeof BigInt === "undefined" ? "没有" : "有") + "）");
+        try {
+            check("加载的是老电视那份", Boot.info().mtcute === "legacy", "Boot.info().mtcute = " + Boot.info().mtcute);
+            var home = await until(function () { return window.__app.screen() === "home" ? true : null; }, 90000);
+            check("连上 Telegram、到主页", !!home, "现在是 " + window.__app.screen());
+            var t0 = Date.now(), me = await TG.me();
+            check("问「我是谁」", !!(me && me.id), (Date.now() - t0) + "ms");
+            await playCheck("老电视那份");
+        } catch (e) { R("中止：" + (e && e.message)); }
+        finally {
+            R(fails ? "结束，" + fails + "/" + steps + " 步失败" : "结束，全部通过（" + steps + " 步）");
+            localStorage.removeItem(LKEY);
+            localStorage.setItem("tg.selftest.legacyDone", "1");
+            setTimeout(function () { location.reload(); }, 1500);
+        }
+    }
+
+    setTimeout(SELFTEST === "diag" ? diagRun : SELFTEST === "samples" ? samplesRun : SELFTEST === "music" ? musicRun : SELFTEST === "legacy" ? legacyRun : loginExpiryRun, 500);
 })();
