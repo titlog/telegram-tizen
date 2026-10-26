@@ -12,7 +12,8 @@
 #   - 没有个人证书。SamsungBili 签名档的证书里有账号邮箱、真名和客厅那台电视的 DUID，签进去就在 signature1.xml /
 #     author-signature.xml 里公开了。用 bilibili-tizen、douyin-tizen 的发布包同一个一次性签名档（BiliRelease，作者 CN=bilibili-tizen）
 #     和 Tizen SDK 自带的分发证书，签完读回检查。
-#   - 只有提交了的东西。app/ 取自 `git archive HEAD`；mtcute 的包（js/tg.bundle.js，不进仓库）用 HEAD 里的 build/ 现打。
+#   - 只有提交了的东西。app/ 取自 `git archive HEAD`；mtcute 的两份包（js/tg.bundle.js、老电视用的 js/tg.legacy.js，都不进仓库）
+#     用 HEAD 里的 build/ 现打。
 #     本机的 js/sites.local.js（站点规则，不进仓库）不会进去。
 set -e
 
@@ -69,7 +70,7 @@ git show HEAD:app/js/diag.js | grep -q '^    var ENDPOINT = "https://[^"]*";' \
 
 echo "== checking =="
 for f in app/js/*.js; do
-  [ "${f:t}" = "tg.bundle.js" ] && continue
+  [ "${f:t}" = "tg.bundle.js" -o "${f:t}" = "tg.legacy.js" ] && continue
   node --check "$f" >/dev/null || { echo "  syntax error in $f"; exit 1; }
 done
 for t in test/i18n.mjs tools/update-verify.mjs tools/diag-verify.mjs; do
@@ -121,7 +122,9 @@ if (g.from !== "build" || String(g.id) !== process.env.TG_ID || g.hash !== proce
 ' "$STAGE/app/js/config.js" "$STAGE/app/js/apikey.js" || exit 1
 # 和 deploy.sh 同一个脚本（build/ 上面已经确认和 HEAD 一致）
 zsh "$ROOT/build/bundle.sh" "$STAGE/app/js/tg.bundle.js"
-node --check "$STAGE/app/js/tg.bundle.js" >/dev/null || { echo "  tg.bundle.js 打出来不能解析"; exit 1; }
+for f in tg.bundle.js tg.legacy.js; do
+  node --check "$STAGE/app/js/$f" >/dev/null || { echo "  $f 没打出来或不能解析"; exit 1; }
+done
 # 包里每个脚本，对着 required_version 那代电视的引擎查（Tizen 5.0 = Chromium 63；mtcute 正常那份只在有 BigInt 的引擎上用，按 5.5 = 69 查）
 JS=("$STAGE"/app/js/**/*.js(N))
 node "$ROOT/tools/syntax-verify.mjs" "${JS[@]}" "$ROOT/build/out/worker.bundle.txt" "$ROOT/build/out/worker.legacy.txt" || { echo "  refuse to release"; exit 1; }
@@ -137,7 +140,7 @@ mv "${WGTS[1]}" "$OUT"
 
 # 读回实际写进去的东西，不信上面的步骤。
 echo "== verifying package =="
-{ git ls-files app | sed 's|^app/||'; echo "js/tg.bundle.js"; } > "$STAGE/expected.txt"
+{ git ls-files app | sed 's|^app/||'; echo "js/tg.bundle.js"; echo "js/tg.legacy.js"; } > "$STAGE/expected.txt"
 TG_ID="$API_ID" TG_HASH="$API_HASH" python3 -I - "$OUT" "$STAGE/expected.txt" "$AUTHOR_NAME" <<'PY'
 import base64, os, re, subprocess, sys, zipfile
 
