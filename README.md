@@ -72,7 +72,7 @@ the original picture quality, and your phone is free as soon as the message is s
 - **Music**: songs posted in your groups and channels (MP3, M4A, OGG / Opus, WAV and FLAC) sit in the grid alongside
   the videos, and channels with only songs appear in the source list too. Pick one and the rest play in order; Up / Down
   change track, and Back returns to the list while the music keeps playing. These TVs cannot decode FLAC themselves, so
-  the app decodes it while downloading. Music stops when you leave the app.
+  the app decodes it while downloading; Apple Lossless (ALAC) .m4a files can't be played. Music stops when you leave the app.
 - **Covers**: when the thumbnail is a black first frame (common with large files), a frame from the middle of the
   film is decoded instead; films get a poster from Wikipedia.
 - **Web links**: `.m3u8` and `.mp4` links posted in a group play directly, and so do **archive.org film pages** —
@@ -134,6 +134,7 @@ All of these can be shared legally, and between them they exercise the main feat
 |---|---|
 | **Tested** | Samsung 2023 65" **CU7090**, firmware Tizen 9.0 (Chromium 120) |
 | **Minimum** | Tizen 5.0 (roughly 2019 models onwards). On Tizen 5.0 the app uses a separate build of the Telegram client library, because that browser lacks BigInt (big numbers are done in plain JavaScript instead); it hasn't been tried on a real 5.0 TV yet, and the first sign-in is slower. Tizen 4.0 and older can't install it |
+| **Known limits** | Tizen 5.5 and 6.0 can't decode portrait H.264 videos taller than 1080 pixels; the app says so |
 | **Other models** | Untested. Whether it works or not, please open an issue with your model and firmware version (Settings → Support → About This TV) |
 
 Download speed is Telegram's, not your connection's: without Premium the TV measured a steady 1.7–2.3 MB/s, about
