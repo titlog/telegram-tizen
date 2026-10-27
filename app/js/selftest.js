@@ -318,7 +318,8 @@
     /* 音乐的整个流程（app 的音乐画面、music.js、flac.js）：一串假的歌，数据从这台电脑上取（TG.source / thumb 对它们换成 HTTP），
      * MP3 → ↓ FLAC（量下载、解码）→ → 快进 → ↓ M4A → ↑↑ 回到 FLAC（解好的留着，应该马上出声）→ 返回列表接着放 */
     async function musicFlow(base) {
-        var files = [["t.mp3", "audio/mpeg", "mp3"], ["../flac/long_16.flac", "audio/flac", "flac"], ["t.m4a", "audio/mp4", "m4a"]], list = [], srcs = {};
+        /* t_alac.m4a：ffmpeg -i src.wav -c:a alac t_alac.m4a（2026-10-27，最后一步用） */
+        var files = [["t.mp3", "audio/mpeg", "mp3"], ["../flac/long_16.flac", "audio/flac", "flac"], ["t.m4a", "audio/mp4", "m4a"], ["t_alac.m4a", "audio/mp4", "m4a"]], list = [], srcs = {};
         for (var i = 0; i < files.length; i++) {
             var f = files[i], src = await Web.httpSource(base + f[0]);
             srcs["selftest:mu" + i] = src;
@@ -357,6 +358,10 @@
             await wait(2500);
             var s = m();
             check("音乐：返回列表接着放", window.__app.screen() === "home" && !s.paused && s.time > 2, "界面 " + window.__app.screen() + "，第 " + (s.index + 1) + " 首 t=" + s.time.toFixed(1));
+            /* ALAC 的 m4a（2026-10-27 别人电视上一串里的一首）：<audio> 只报 DEMUXER_ERROR，app 下的时候看 moov 认出来，说是什么、不当出事 */
+            window.__app.playMusic(list, 3);
+            var said = await until(function () { return /ALAC/.test(txt("mu-state")) ? true : null; }, 15000);
+            check("音乐：ALAC 的 m4a 说电视解不了", !!said, "状态「" + txt("mu-state") + "」");
         } finally {
             window.__app.stopMusic();
             TG.source = orig.source; TG.thumb = orig.thumb;
@@ -387,6 +392,11 @@
         var t0 = Date.now(), page = await TG.videos(src.id, undefined, 40);
         var it = page.items.filter(function (x) { return x.kind !== "music" && x.kind !== "web" && x.size > 20 * 1048576 && x.size < 2048 * 1048576; })[0];
         check(label + "：取片子", !!it, page.items.length + " 个，" + (Date.now() - t0) + "ms");
+        /* 备选清晰度（tg.js 的 altsOf，2026-10-27）：读的路径错了也只是一直是空的、不报错 —— 这里把读到的说出来 */
+        var withRaw = page.items.filter(function (x) { return x.msg && x.msg.raw && x.msg.raw.media; }).length;
+        var withAlts = page.items.filter(function (x) { return x.alts && x.alts.length; });
+        R("备选清晰度：" + page.items.length + " 个里 " + withRaw + " 个读得到 raw.media、" + withAlts.length + " 个有" +
+          (withAlts[0] ? "，例如 " + withAlts[0].width + "x" + withAlts[0].height + " → " + withAlts[0].alts.map(function (a) { return a.w + "x" + a.h + " " + (a.codec || "?"); }).join(" / ") : ""));
         if (!it) { return; }
         var v = document.createElement("video");
         v.muted = true;

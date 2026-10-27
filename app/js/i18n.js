@@ -230,6 +230,7 @@ var I18n = (function () {
         "视频格式 {0} 放不了": "Video format {0} isn't supported",
         "音频格式 {0} 放不了": "Audio format {0} isn't supported",
         "Apple 无损（ALAC）音频电视解不了": "The TV can't decode Apple Lossless (ALAC) audio",
+        "这台电视解不了高度超过 1080 的 H.264 视频（这部是 {0}）": "This TV can't decode H.264 video taller than 1080 pixels (this one is {0})",
         "FLAC 音轨电视解不了": "The TV can't decode FLAC audio tracks",
         "字幕格式 {0} 放不了": "Subtitle format {0} isn't supported",
         "未知": "unknown",

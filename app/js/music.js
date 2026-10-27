@@ -86,15 +86,16 @@ var Music = (function () {
                 }, 500);
             }, function (e) {
                 if (my !== token || e.name === "AbortError") { return; }
+                if (e.known) { fail(my, e.message, true); return; }      // 电视解不了的编码（ALAC），app 下的时候看出来的
                 fail(my, tx("下载出错：{0}", errStr(e)));
             });
         }
 
-        function fail(my, msg) {
+        function fail(my, msg, known) {
             if (my !== token) { return; }
             fails++;
             R("放不了（第 " + (idx + 1) + "/" + list.length + " 首，" + (list[idx].ext || list[idx].mime) + "）：" + msg);
-            o.onState("error", { msg: msg });
+            o.onState("error", { msg: msg, known: !!known });
             /* 3 秒后放下一首；连着 5 首都放不了就停（一整串 FLAC 别一直跳） */
             if (idx + 1 < list.length && fails < MAX_FAILS) { skip = setTimeout(function () { if (my === token) { start(idx + 1); } }, SKIP_MS); }
         }

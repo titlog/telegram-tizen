@@ -367,8 +367,20 @@ var TG = (function () {
             mime: d.mimeType || "",
             date: m.date,
             hasCover: !!d.videoCover,
+            alts: altsOf(m),
             info: captionInfo(m.text || "")
         };
+    }
+
+    /* Telegram 给视频另外转好的清晰度（messageMediaDocument.alt_documents）。现在只记进「播放」那行：高过 1088 的 H.264 在 Tizen 5.5 / 6.0
+     * 上解不了，要是这些片子有矮一档的，那些电视就能改放它 —— 先看别人电视上的片子有没有（2026-10-27）。 */
+    function altsOf(m) {
+        var a = m.raw && m.raw.media && m.raw.media.altDocuments;
+        if (!a || !a.length) { return []; }
+        return a.map(function (d) {
+            var v = (d.attributes || []).filter(function (x) { return x._ === "documentAttributeVideo"; })[0] || {};
+            return { w: v.w || 0, h: v.h || 0, codec: v.videoCodec || "", size: Number(d.size) || 0 };
+        });
     }
 
     /* 一首歌：歌名、歌手从音频属性里来（频道的说明文字多半是推广），没有就用文件名。封面是 Telegram 给的专辑图（缩略图） */

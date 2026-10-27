@@ -103,11 +103,23 @@ var Player = (function () {
         var api = {};
 
         var lastPhase = "";
-        function state(phase, msg) {
+        /* known：出错的原因是知道的（电视的限制），屏幕上说清楚就好，不当出事上传 */
+        function state(phase, msg, known) {
             if (phase === lastPhase && !msg) { return; }
             lastPhase = phase;
-            if (onState) { try { onState(phase, msg); } catch (e) {} }
+            if (onState) { try { onState(phase, msg, known); } catch (e) {} }
         }
+
+        /* 高过 1088 的 H.264：Tizen 5.5 / 6.0 的硬件解码器解不了（2026-10-27 诊断日志：四台电视高于 1088 的十四次全是出画面前 code=3，
+         * 不高于的十次全成；Tizen 9 放得了；抖音那边同一台 Tizen 6.5 的竖屏 H.264 也是这样，H.265 的竖屏直播却放得了）。
+         * 这台电视放成过一部这么高的（出画面后走了 2 秒），code=3 就不是这个原因。见 docs/播放引擎.md */
+        var TALL_KEY = "tg.h264tall";
+        function tallVideo(sess) {
+            var v = null;
+            sess.tracks.forEach(function (T) { if (T.tr.kind === "video") { v = T.tr; } });
+            return v && /^avc/.test(v.codec || "") && v.height > 1088 ? v : null;
+        }
+        function tallOk() { try { return localStorage.getItem(TALL_KEY) === "1"; } catch (e) { return false; } }
 
         /* 音轨放不放得了。FLAC：电视的 MSE 说认（isTypeSupported 是 true），数据也进得去，可从来不解 —— readyState 停在 1，
          * 只有音频、配了视频都一样（2026-10-26 deploy.sh --music 实测；AAC 同样的放法没事）。MKV 里 FLAC 音轨的片子以前会一直卡在
@@ -169,6 +181,12 @@ var Player = (function () {
             R(msg);
             S.lanes.forEach(stopLane);
             S.tracks.forEach(function (T) { T.q.length = 0; });
+            var tall = e && e.code === 3 && !S.firstFrameMs && !tallOk() ? tallVideo(S) : null;
+            if (tall) {
+                R("高 " + tall.height + " 的 H.264（" + tall.codec + "），这台电视没放成过这么高的：当成解码器的限制，不当出事");
+                state("error", tx("这台电视解不了高度超过 1080 的 H.264 视频（这部是 {0}）", tall.width + "x" + tall.height), true);
+                return;
+            }
             state("error", msg);
         }
 
@@ -663,7 +681,11 @@ var Player = (function () {
             R(why + " → " + t.toFixed(1) + "s" + (exact > t ? "（停在 " + exact.toFixed(1) + "s）" : "") + "，" + where.join("，") + " 读");
         }
 
-        function levelNote(v) { var f = v && v.levelFix; return f ? "，H.264 级别 " + f.from + " → " + f.to + "（一帧 " + f.mbs + " 个宏块，原来那级不够）" : ""; }
+        function levelNote(v) {
+            var f = v && v.levelFix, p = v && v.profileFix;
+            return (p ? "，avcC 的 profile " + p.from + " → " + p.to + "（不是 H.264 有的值）" : "") +
+                   (f ? "，H.264 级别 " + f.from + " → " + f.to + "（一帧 " + f.mbs + " 个宏块，原来那级不够）" : "");
+        }
 
         /* ---------- MKV 的打开、跳转 ---------- */
 
@@ -763,6 +785,15 @@ var Player = (function () {
                     state("playing");
                     resolve();
                     monitor(sess);
+                    var from = video.currentTime;
+                    if (tallVideo(sess) && !tallOk()) {
+                        setTimeout(function () {
+                            if (S === sess && !sess.dead && video.currentTime > from + 2) {
+                                try { localStorage.setItem(TALL_KEY, "1"); } catch (e) {}
+                                R("高 " + tallVideo(sess).height + " 的 H.264 放成了：这台电视解得了");
+                            }
+                        }, 4000);
+                    }
                 }
                 if (performance.now() - sess.t0 > 90000) {
                     clearInterval(tick);

@@ -1072,14 +1072,14 @@
     var player = mse;      // 当前在用的那个：Telegram 的文件 → mse，网页链接 → webPlayer
     var saveTimer = 0, ovTick = 0, subTimer = 0;
 
-    function onPlayerState(phase, msg) {
+    function onPlayerState(phase, msg, known) {
         if (S.screen !== "player") { return; }
         if (phase === "loading") { spin(true, T("正在打开…")); }
         else if (phase === "buffering") { spin(true, T("缓冲中…")); }
         else if (phase === "playing") { spin(false); }
         else if (phase === "note") { toast(msg, 5000); }
         else if (phase === "ended") { onEnded(); }
-        else if (phase === "error") { showError(msg); }
+        else if (phase === "error") { showError(msg, known); }
     }
 
     function spin(on, text) { $("spin").classList.toggle("on", !!on); $("spin-text").textContent = text || ""; }
@@ -1122,7 +1122,8 @@
         var pref = Store.getPrefs(it.fileKey);
         if (!web) {
             R((again ? "换音轨重开「" : "播放「") + Diag.priv(it.title) + "」" + fmtSize(it.size) + " " + fmtTime(it.duration) + (it.asFile ? "（文件 " + Diag.priv(it.fileName || it.mime) + "）" : "") +
-              (startAt ? "，从 " + fmtTime(startAt) + (again ? "" : " 接着放") : "") + (moov ? "，" + (moov.mkv ? "MKV 头" : "moov") + "有缓存" : "") + (opts.audio || pref.audio ? "，音轨 " + (opts.audio || pref.audio) : ""));
+              (startAt ? "，从 " + fmtTime(startAt) + (again ? "" : " 接着放") : "") + (moov ? "，" + (moov.mkv ? "MKV 头" : "moov") + "有缓存" : "") + (opts.audio || pref.audio ? "，音轨 " + (opts.audio || pref.audio) : "") +
+              (it.alts && it.alts.length ? "，备选清晰度 " + it.alts.map(function (a) { return a.w + "x" + a.h + " " + (a.codec || "?") + " " + fmtSize(a.size); }).join(" / ") : ""));
             if (startAt && !again) { toast(T("从 {0} 接着放", fmtTime(startAt))); }
         } else if (moov) { R("moov 有缓存"); }
         var t0 = performance.now();
@@ -1239,15 +1240,16 @@
         if (ended) { toast(T("看完了")); }
     }
 
-    function showError(msg) {
+    /* known：电视的限制（解不了的格式、太高的 H.264），说清楚就好：不放留 issue 的码、不当出事上传 */
+    function showError(msg, known) {
         /* 一次失败只报一次：播放器先 state("error") 报一次，open() 的 promise 再 reject 一次（2026-10-26 每份诊断日志里都是
          * 「放不了：90 秒没出画面」紧跟着「放不了：timeout」、出事也记两回）。play() 开头会把 perr 藏起来 */
         if ($("perr").style.display === "block") { return; }
         spin(false);
-        $("perr").innerHTML = T("放不了：{0}", esc(msg || T("未知错误"))) + "<br><span style='color:#8b939b;font-size:28px'>" + T("按返回键回到列表") + "</span>" + reportHtml(240);
+        $("perr").innerHTML = T("放不了：{0}", esc(msg || T("未知错误"))) + "<br><span style='color:#8b939b;font-size:28px'>" + T("按返回键回到列表") + "</span>" + (known ? "" : reportHtml(240));
         $("perr").style.display = "block";
         R("放不了：" + msg);
-        Diag.incident("放不了：" + msg);
+        if (!known) { Diag.incident("放不了：" + msg); }
     }
 
     /* 浮层出来时字幕抬到它上面（#player.ovon） */
@@ -1436,18 +1438,63 @@
     function isFlac(it) { return it.ext === "flac" || /flac/i.test(it.mime || ""); }
     async function loadTrack(it, onProgress, signal) {
         var st = TG.source(it).stream(0, signal, function () { return Promise.resolve(); }), parts = [], got = 0, r, w = isFlac(it) ? Flac.worker() : null;
+        var mp4 = !w && isMp4Audio(it), known = null;
         try {
             while (!(r = await st.iter.next()).done) {
                 got += r.value.length;
                 if (w) { w.push(r.value); } else { parts.push(r.value); }
                 onProgress(got, it.size, "download");
+                if (mp4 && known === null && parts.length === 2) { known = m4aProblem(parts, got, false); unplayable(known); }
             }
+            if (mp4 && known === null) { unplayable(m4aProblem(parts, got, true)); }
             if (!w) { return new Blob(parts, { type: it.mime || "" }); }
             onProgress(got, it.size, "decode");
             var t0 = performance.now(), wav = await w.end();
             Log.report("music", "FLAC 下完之后又等解码 " + Math.round(performance.now() - t0) + "ms，WAV " + fmtMB(wav.size));
             return wav;
         } catch (e) { if (w) { w.stop(); } throw e; }
+    }
+
+    /* m4a 里是电视解不了的编码：2026-10-27 一串 40 首里的一首 68MB、5 分半（1.7Mbps，ALAC），<audio> 只报 DEMUXER_ERROR_NO_SUPPORTED_STREAMS，
+     * 屏幕上是这句原话、还当出事传了上来。看 moov 里的音轨，解不了就说是什么（和视频那边同一句）、跳到下一首。moov 在开头的，头两块到了就知道。 */
+    function isMp4Audio(it) { return /^(m4a|m4b|mp4|alac)$/i.test(it.ext || "") || /audio\/(mp4|x-m4a|m4a)/i.test(it.mime || ""); }
+    function bytesAt(parts, off, len) {
+        var out = new Uint8Array(len), o = 0, at = 0;
+        for (var i = 0; i < parts.length && o < len; i++) {
+            var p = parts[i], end = at + p.length;
+            if (end > off + o) {
+                var from = off + o - at, n = Math.min(p.length - from, len - o);
+                out.set(p.subarray(from, from + n), o);
+                o += n;
+            }
+            at = end;
+        }
+        return out;
+    }
+    /* "" = 放得了（或者看不出来），解不了的话是那句话；whole 为假时 moov 还没到手回 null */
+    function m4aProblem(parts, total, whole) {
+        var off = 0;
+        while (off + 8 <= total) {
+            var h = bytesAt(parts, off, 16), size = ((h[0] << 24) >>> 0) + (h[1] << 16) + (h[2] << 8) + h[3];
+            var type = String.fromCharCode(h[4], h[5], h[6], h[7]);
+            if (size === 1) { size = (((h[8] << 24) >>> 0) + (h[9] << 16) + (h[10] << 8) + h[11]) * 4294967296 + ((h[12] << 24) >>> 0) + (h[13] << 16) + (h[14] << 8) + h[15]; }
+            if (type === "moov") {
+                if (off + size > total) { return whole ? "" : null; }
+                try {
+                    var bad = Mp4.parseMoov(bytesAt(parts, off, size)).tracks.filter(function (t) { return t.kind === "audio" && t.unsupported; })[0];
+                    return bad ? bad.unsupported : "";
+                } catch (e) { return ""; }
+            }
+            if (size < 8) { return ""; }
+            off += size;
+        }
+        return whole ? "" : null;
+    }
+    function unplayable(why) {
+        if (!why) { return; }
+        var e = new Error(why);
+        e.known = true;
+        throw e;
     }
 
     /* 卡片上的专辑图：Telegram 给的缩略图（方的），没有就是歌名卡片。不截帧、不找海报 */
@@ -1517,7 +1564,7 @@
         else if (phase === "paused") { st.textContent = T("已暂停"); }
         else if (phase === "error") {
             st.textContent = T("放不了：{0}", info.msg) + (music.index() + 1 < l.length ? T("，3 秒后放下一首") : "");
-            Diag.incident("放不了音乐：" + info.msg);
+            if (!info.known) { Diag.incident("放不了音乐：" + info.msg); }
         } else if (phase === "done") {
             st.textContent = T("这一串放完了");
             if (S.screen !== "music") { toast(T("音乐放完了")); }

@@ -92,9 +92,10 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
 - **mtcute 在后台线程**；给它 wasm 先 `WebAssembly.compile`；下载没背压，靠 `throttle` 钩子；起点按 512KB 对齐；挂到后台一分钟以上连接作废，
   要重连。→ [docs/播放引擎.md](docs/播放引擎.md)
 - **播放引擎**：自己写的 MP4 / MKV 解析 + MSE；按秒背压；音视频隔得远就分两路读；**三星的 MSE 不跨空档**，起点要落在音视频都有的地方；
-  open GOP 跳转丢前导帧、先清缓冲再挪播放头；H.264 级别写小了改够；MKV 结尾 `ended` 不一定来。→ [docs/播放引擎.md](docs/播放引擎.md)
+  open GOP 跳转丢前导帧、先清缓冲再挪播放头；H.264 级别写小了改够、avcC 的 profile 写成 0 照 SPS 改；MKV 结尾 `ended` 不一定来；
+  **高过 1088 的 H.264 在 Tizen 5.5 / 6.0 上解不了**（说清楚、不当出事）。→ [docs/播放引擎.md](docs/播放引擎.md)
 - **电视解不了的音频**：DTS、TrueHD、ALAC，还有**嘴上说认的 FLAC**（MSE、`<audio>` 都不解）。视频里的 FLAC 音轨当放不了；
-  音乐里的 FLAC 用 flac.js 软件解成 WAV。→ [docs/音乐.md](docs/音乐.md)
+  音乐里的 FLAC 用 flac.js 软件解成 WAV；音乐里的 ALAC 下的时候看 moov 认出来、说清楚、跳下一首。→ [docs/音乐.md](docs/音乐.md)
 - **`video.src`（三星自己的播放器）放网上的 MP4 不可靠**：网页链接里的 MP4 走播放引擎（`Web.httpSource`）。音频做成 blob 给 `<audio>` 是好的。
   → [docs/网页链接.md](docs/网页链接.md)
 - **遥控器**：长按确认 650ms 开菜单，按住时的自动重复不算新的一下；在卡片上按确认进播放器 / 音乐画面，那一下的重复和松开也落在里面，

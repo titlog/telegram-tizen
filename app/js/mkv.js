@@ -332,6 +332,7 @@ var Mkv = (function () {
         var id = t.codecId, cp = t.codecPrivate;
         if (t.kind === "video") {
             if (id === "V_MPEG4/ISO/AVC" && cp && cp.length > 6) {
+                t.profileFix = Mp4.fixAvcProfile(cp);                       // profile 写成 0 这种的照 SPS 改（见 mp4.js）
                 t.levelFix = Mp4.fixAvcLevel(cp, t.width, t.height);       // 级别写小了改够（见 mp4.js），原地改 CodecPrivate
                 t.config = cp; t.codec = Mp4.avcString("avc1", cp);
                 t.stsd = visual("avc1", t, Mp4.box("avcC", cp));

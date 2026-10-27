@@ -83,6 +83,7 @@ var Mp4 = (function () {
     function avcCodec(b, entry, t, tr) {
         var c = child(b, { p: entry.p + 78, e: entry.e }, "avcC");
         if (!c) { return t; }
+        tr.profileFix = fixAvcProfile(b.subarray(c.p, c.e));
         tr.levelFix = fixAvcLevel(b.subarray(c.p, c.e), tr.width, tr.height);      // 原地改，后面切出来的 stsd 就是改过的
         entry.config = b.slice(c.p, c.e);           // WebCodecs 解单帧要的 description
         return avcString(t, entry.config);
@@ -105,6 +106,18 @@ var Mp4 = (function () {
         /* 第一个 SPS：avcC 第 6 字节起是 2 字节长度 + NAL（头 0x67、profile_idc、约束位、level_idc） */
         if ((c[5] & 0x1f) && (c[8] & 0x1f) === 7) { c[11] = want[0]; }
         return { from: have / 10, to: want[0] / 10, mbs: mbs };
+    }
+    /* avcC 头里的 profile 不是 H.264 有的值：2026-10-26 一台 Tizen 9，一部片子写的是 avc1.000004，isTypeSupported 不认、一下都没试就
+     * 「can't be played」；同一台电视上同一个来源的 avc1.4d0004（级别一样写错）放得了。avcC 头这三个字节本来是从 SPS 抄的：照 SPS 的改；
+     * SPS 里也不对就写 Main（77）。**SPS 本身不动**：profile_idc 决定 SPS 后面有没有色度那几个字段，改了就解析错了；Main 和 0 是同一套语法。
+     * 原地改 c（avcC 正文），返回 {from, to}；没改返回 null。 */
+    var AVC_PROFILES = [66, 77, 88, 100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135];
+    function fixAvcProfile(c) {
+        if (!c || c.length < 12 || AVC_PROFILES.indexOf(c[1]) >= 0) { return null; }
+        var from = c[1], sps = (c[5] & 0x1f) && (c[8] & 0x1f) === 7 && AVC_PROFILES.indexOf(c[9]) >= 0;
+        c[1] = sps ? c[9] : 77;
+        if (sps) { c[2] = c[10]; }
+        return { from: from, to: c[1] };
     }
     /* avcC 的正文（AVCDecoderConfigurationRecord）→ codecs 字符串。mkv.js 也用（MKV 的 CodecPrivate 就是它） */
     function avcString(t, c) { return t + "." + hex2(c[1]) + hex2(c[2]) + hex2(c[3]); }
@@ -530,6 +543,6 @@ var Mp4 = (function () {
         scanTop: scanTop, parseMoov: parseMoov, initSegment: initSegment, fragment: fragment, fragmentFrames: fragmentFrames, afterLeading: afterLeading,
         sampleAt: sampleAt, keyAtOrBefore: keyAtOrBefore, keyNear: keyNear, pts: pts,
         /* 给 mkv.js 拼 stsd 用的：写盒子的小工具、codecs 字符串 */
-        W: W, box: box, full: full, raw: raw, concat: concat, hex2: hex2, avcString: avcString, hevcString: hevcString, fixAvcLevel: fixAvcLevel
+        W: W, box: box, full: full, raw: raw, concat: concat, hex2: hex2, avcString: avcString, hevcString: hevcString, fixAvcLevel: fixAvcLevel, fixAvcProfile: fixAvcProfile
     };
 })();
