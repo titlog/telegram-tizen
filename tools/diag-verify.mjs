@@ -411,6 +411,20 @@ await t("boot.js：diag.js 排在最前（log.js 一加载就要用它）", () =
   assert.equal(list[0], "diag.js", "SCRIPTS 是 " + list.join(", "));
 });
 
+/* ---------------- Accounts.describe：它的话原样接进日志，编号不在里面 ---------------- */
+
+await t("账号对不上时，那句话里不带用户编号", () => {
+  const storage = new Map([["tg.accounts.v1", JSON.stringify({ list: [{ id: "a1", storage: "tg-session", userId: 5550001234, name: "x" }],
+                                                               active: "a1", next: 2, prev: "", drop: [] })]]);
+  const sandbox = { JSON, String, localStorage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)), removeItem: (k) => storage.delete(k) } };
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(here("../app/js/accounts.js"), "utf8") + "\nthis.Accounts = Accounts;", sandbox);
+  const said = sandbox.Accounts.describe("a1", { id: 5550009876, firstName: "y" });
+  assert.match(said, /^对不上/, said);
+  assert.doesNotMatch(said, /5550001234|5550009876/, said);
+  assert.equal(sandbox.Accounts.describe("a1", { id: 5550001234, firstName: "x" }), "对上了");
+});
+
 /* ---------------- 源码：进 Log.report() / Diag.incident() 的作者名、文案、昵称都包起来 ---------------- */
 
 await t("app/js：进日志和出事原因的群名、片名、文件名、搜索词、地址、账号名、用户 ID 都包在 Diag.priv 里", () => {

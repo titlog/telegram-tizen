@@ -62,7 +62,8 @@ var Accounts = (function () {
     function describe(id, user) {
         var a = byId(id);
         if (!a || !user) { return "没有"; }
-        if (a.userId && a.userId !== user.id) { return "对不上：这一行是 " + a.userId + "，Telegram 答的是 " + user.id; }
+        /* 两个编号都不进这句：它原样接进日志那行，而那行自己已经把两个编号包着打过了 */
+        if (a.userId && a.userId !== user.id) { return "对不上：这一行记的人和 Telegram 答的不是同一个"; }
         a.userId = user.id;
         a.name = user.displayName || user.firstName || user.username || String(user.id);
         write();
