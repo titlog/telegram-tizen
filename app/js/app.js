@@ -115,9 +115,9 @@
         }
         R("连上 Telegram " + Math.round(performance.now() - t0) + "ms，mtcute 在 " + TG.mode() + (Boot.info().mtcute === "legacy" ? "（老电视那份：大数用 JSBI）" : "") + "；界面 " + I18n.lang + "（" + I18n.why + "，系统语言 " + I18n.sys + "）" +
           "；API ID 是" + (api.from === "build" ? "安装包里带的" : "电视上填的"));
-        var acct = Accounts.active(), me = await TG.me();
+        var acct = Accounts.active(), me = await TG.me(), fresh = false;
         if (!me) {
-            try { await login(); }
+            try { await login(); fresh = true; }
             catch (e) {
                 /* Telegram 不认这组（连接、getMe 都不验它，扫码这一步才验）：电视上填的 → 带着刚填的回到填写页改；
                  * 包里带的（被停用了）→ 空着的填写页，填自己申请的。填好了重新来过 */
@@ -133,6 +133,12 @@
                 return;
             }
             me = await TG.me();
+        }
+        /* 刚扫的码是另一个人（这一行原来那人的会话在别处被结束了）：这一行改成扫码的人，原来那人的本地记录删掉，重新加载 */
+        if (fresh && me && Accounts.reassign(acct.id, me)) {
+            R("扫码登录的是另一个人：" + acct.id + " 原来那人的会话已经没了，这一行改成扫码的人（id=" + Diag.priv(me.id) + "），原来那人的本地记录删掉，重新加载");
+            location.reload();
+            return;
         }
         /* 认人的判据是 Telegram 答的用户编号，不是「认不认得出一个人」（bilibili 那边就是这么漏过去的）；名字也只从这里来 */
         var verdict = Accounts.describe(acct.id, me);
@@ -153,14 +159,26 @@
         if (once) { toast(once, 4000); }
         S.screen = "home";
         $("home").classList.remove("hide");
+        /* 到了主页之后会话没了（手机上结束了这个会话）：以前照常跑、每个请求都 401。重新加载，boot 会因为 getMe 失败回到扫码 */
+        TG.onSignedOut(function (e) {
+            R("这个会话没了（" + errStr(e) + "），重新加载、回到扫码");
+            location.reload();
+        });
         /* 不要收藏夹（用户 2026-10-01：习惯用自己建的一个群）。上次的来源直接开；第一次用就等探测到第一个有视频的。 */
         var last = Store.lastSource();
         if (last && last.id === "me") { last = null; }
         if (last) {
             S.sources = [last];
             renderRail();
-            await openSource(last, { quiet: true });
-            R("启动到主页 " + Math.round(performance.now() - t0) + "ms，来源「" + Diag.priv(S.src.title) + "」" + S.items.length + " 个视频");
+            if (await openSource(last, { quiet: true }) === "gone") {
+                /* 上次的来源进不去了：像第一次用一样，开第一个有视频的 */
+                R("启动时上次的来源进不去了，改开第一个有视频的");
+                toast(T("上次看的群或频道进不去了，换了一个"), 4000);
+                S.src = null;
+                last = null;
+            } else {
+                R("启动到主页 " + Math.round(performance.now() - t0) + "ms，来源「" + Diag.priv(S.src.title) + "」" + S.items.length + " 个视频");
+            }
         } else {
             $("empty").innerHTML = T("正在找有视频的群和频道…");
         }
@@ -182,7 +200,8 @@
         var list;
         S.srcLoading = true;
         srcAt = Date.now();
-        try { list = await TG.sources(40); } catch (e) { S.srcLoading = false; R("来源列表出错 " + errStr(e)); return; }
+        var tList = performance.now(), listMs;
+        try { list = await TG.sources(40); listMs = Math.round(performance.now() - tList); } catch (e) { S.srcLoading = false; R("来源列表出错 " + errStr(e)); return; }
         S.allSources = list;
         var before = S.sources.map(function (s) { return s.id; }).join(",");
         function refresh() {
@@ -211,14 +230,17 @@
                         if (openFirst && !S.src) { openSource(s); }
                     }
                     refresh();
-                } catch (e) { /* 频道没权限之类，跳过 */ }
+                } catch (e) {
+                    /* 退出了、改成私有的：以前只是跳过，存着的旧计数 n>0 一直把它留在来源栏里，点一次失败一次 */
+                    if (TG.noAccess(e)) { Store.setSrcCount(s.id, 0); refresh(); }
+                }
             }
         }
         await Promise.all([worker(), worker()]);
         await refreshWebSources(list);
         S.srcLoading = false;
         var after = S.sources.map(function (s) { return s.id; }).join(",");
-        R("来源：" + list.length + " 个会话里 " + withVideo + " 个有视频（问了 " + probed + " 个，" + Math.round(performance.now() - t0) + "ms）" +
+        R("来源：" + list.length + " 个会话里 " + withVideo + " 个有视频（会话列表 " + listMs + "ms，问了 " + probed + " 个，" + Math.round(performance.now() - t0) + "ms）" +
           (before && before !== after ? "，列表变了" : ""));
         if (openFirst && !S.src) {
             $("src-sub").textContent = "";
@@ -232,15 +254,23 @@
         $("panel").classList.add("on");
         /* 电视上还有别的账号：说清楚这是在添加账号（还是这个账号的会话没了要重扫），按返回能回去 */
         var a = Accounts.active(), others = Accounts.list().length > 1;
-        $("qrnote").textContent = !others ? "" : !a.userId ? T("添加账号：用另一个 Telegram 账号扫码 · 按返回键取消") : T("{0} 要重新扫码登录 · 按返回键换别的账号", a.name);
+        /* 只有一个账号、它原来登录着（会话在别处被结束了）：也说一句，不然观众只看到扫码页、不知道为什么 */
+        $("qrnote").textContent = !others ? (a.userId ? T("{0} 的登录失效了，重新扫码就好", a.name) : "") :
+            !a.userId ? T("添加账号：用另一个 Telegram 账号扫码 · 按返回键取消") : T("{0} 要重新扫码登录 · 按返回键换别的账号", a.name);
         var n = 0;
         await TG.login(function (url) {
             n++;
+            /* Tizen 5.0（老的那份 mtcute）上从启动到能登录要两分半（2026-10-28）：第一张码出在哪一刻 */
+            if (n === 1) { R("扫码：第一张码，从进程启动 " + Math.round(performance.now()) + "ms"); }
             $("qr").innerHTML = TGLib.qrSvg(url, 10);
             $("qrstate").textContent = T("二维码 30 秒换一张（第 {0} 张）", n);
         }, function () {
+            R("扫码：手机上确认了（第 " + n + " 张码）");
             $("qrstate").textContent = T("已扫码，正在登录…");
-        }, askPassword, function () { toast(T("两步验证密码不对，再输一次")); });
+        }, function () {
+            R("扫码：要两步验证密码");
+            return askPassword().then(function (pw) { R("扫码：交了两步验证密码"); return pw; });
+        }, function () { R("扫码：两步验证密码不对"); toast(T("两步验证密码不对，再输一次")); });
         R("扫码登录成功（出了 " + n + " 张码）");
         $("panel").classList.remove("on");
     }
@@ -375,6 +405,14 @@
             S.loading = false;
             R("来源「" + Diag.priv(src.title) + "」出错 " + errStr(e));
             $("src-sub").textContent = "";
+            if (TG.noAccess(e)) {
+                /* 退出了、被移出、改成私有、删了：说清楚、不放 issue 码、不当出事，从来源栏拿掉，开机不再去开它
+                 * （2026-10-28 一台电视在一个退出了的频道上点了四次，四次都是原始错误加码、传了上来） */
+                Store.setSrcCount(src.id, 0);
+                Store.dropLastSource(src.id);
+                $("empty").innerHTML = T("进不去这个群或频道了：可能已经退出，或者它不再公开");
+                return "gone";
+            }
             $("empty").innerHTML = T("读不到这里的视频：{0}<br>按确认重试", esc(errStr(e))) + reportHtml(240);
             Diag.incident("读不到来源里的视频：" + errStr(e));
             return;

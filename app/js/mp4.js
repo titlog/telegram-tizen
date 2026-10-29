@@ -201,6 +201,12 @@ var Mp4 = (function () {
             if (t !== "tx3g" && t !== "text" && t !== "wvtt") { tr.unsupported = tx("字幕格式 {0} 放不了", t); }
         }
         tr.stsd = b.slice(stsd.s, stsd.e);
+        /* stsd 原样拷进 init 段。2026-10-28 两台 Tizen 9 各有一部片子（像苹果编码器写的）init 进去就 CHUNK_DEMUXER_ERROR_APPEND_FAILED，
+         * 同编码的别的片子都好：出错时那行带上这里面有什么，分得开「条目里有解析器不收的盒子」和别的 */
+        try {
+            var kids = tr.kind === "video" ? children(b, entry.p + 78, entry.e) : tr.kind === "audio" ? children(b, c0, entry.e) : [];
+            tr.stsdNote = "stsd v" + b[stsd.p] + " " + u32(b, stsd.p + 4) + " 条 " + t + "[" + kids.map(function (k) { return k.type; }).join(",") + "]";
+        } catch (e) { tr.stsdNote = "stsd 读不出：" + e.message; }
     }
 
     /* ---------- 样本表 ---------- */

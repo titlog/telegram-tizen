@@ -94,6 +94,8 @@ var Store = (function () {
 
     function lastSource() { return read(SKEY, null); }
     function setLastSource(src) { write(SKEY, { id: src.id, title: src.title, kind: src.kind, url: src.url }); }
+    /* 上次的来源进不去了（退出了、改成私有）：不再开机就去开它 */
+    function dropLastSource(id) { var l = lastSource(); if (l && l.id === id) { try { localStorage.removeItem(SKEY); } catch (e) {} } }
 
     /* 网页列表当来源（web.js）：群里发的列表链接。按发在哪个群分组存 —— 每次打开那个群就用这次找到的替换掉，
      * 群里删了那条消息，来源栏里也就没了。group id → [{id, title, kind: "web", url}] */
@@ -178,5 +180,5 @@ var Store = (function () {
         return put("cover", key, v, 800);    // 缩略图 20–40KB，800 张 ~30MB
     }
 
-    return { setProgress: setProgress, getProgress: getProgress, srcCount: srcCount, setSrcCount: setSrcCount, noPoster: noPoster, markNoPoster: markNoPoster, noFrame: noFrame, markNoFrame: markNoFrame, lastSource: lastSource, setLastSource: setLastSource, once: once, getPrefs: getPrefs, setPrefs: setPrefs, dur: dur, setDur: setDur, searches: searches, addSearch: addSearch, webSources: webSources, setWebSources: setWebSources, webSourceGroups: webSourceGroups, addHistory: addHistory, history: history, clearHistory: clearHistory, getMoov: getMoov, putMoov: putMoov, getCover: getCover, putCover: putCover };
+    return { setProgress: setProgress, getProgress: getProgress, srcCount: srcCount, setSrcCount: setSrcCount, noPoster: noPoster, markNoPoster: markNoPoster, noFrame: noFrame, markNoFrame: markNoFrame, lastSource: lastSource, setLastSource: setLastSource, dropLastSource: dropLastSource, once: once, getPrefs: getPrefs, setPrefs: setPrefs, dur: dur, setDur: setDur, searches: searches, addSearch: addSearch, webSources: webSources, setWebSources: setWebSources, webSourceGroups: webSourceGroups, addHistory: addHistory, history: history, clearHistory: clearHistory, getMoov: getMoov, putMoov: putMoov, getCover: getCover, putCover: putCover };
 })();

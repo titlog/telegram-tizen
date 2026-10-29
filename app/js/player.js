@@ -147,7 +147,7 @@ var Player = (function () {
             }
             try {
                 if (op.remove) { T.sb.remove(op.remove[0], op.remove[1]); T.removing = op; }
-                else { T.sb.appendBuffer(op.buf); T.full = false; if (op.t !== undefined) { T.lastT = op.t; } }
+                else { T.cur = op.init ? "init 段" : "t=" + (op.t !== undefined ? op.t.toFixed(1) : "?") + " 那段"; T.sb.appendBuffer(op.buf); T.full = false; if (op.t !== undefined) { T.lastT = op.t; } }
                 T.q.shift();
                 if (op.buf) { T.qBytes -= op.buf.length; }
             } catch (e) {
@@ -536,10 +536,12 @@ var Player = (function () {
             T.sb.addEventListener("updateend", function () {
                 var r = T.removing;
                 T.removing = null;
+                if (!r) { T.nOk = (T.nOk || 0) + 1; }
                 if (r && r.done) { r.done(); }
                 pumpSb(T);
             });
-            T.sb.addEventListener("error", function () { R("SourceBuffer error " + tr.mime); });
+            /* 进的是 init 段还是第几段、stsd 里有什么：APPEND_FAILED 只说「解析失败」，这两样分得开是文件头的事还是数据的事 */
+            T.sb.addEventListener("error", function () { R("SourceBuffer error " + tr.mime + "（正在进 " + (T.cur || "?") + "，之前进成 " + (T.nOk || 0) + " 次；" + (tr.stsdNote || "") + "）"); });
             sess.tracks.push(T);
             return T;
         }

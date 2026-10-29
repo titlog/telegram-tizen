@@ -118,7 +118,10 @@ var Music = (function () {
         audio.addEventListener("error", function () {
             if (!audio.getAttribute("src")) { return; }
             var e = audio.error;
-            fail(token, "audio error " + (e ? e.code + (e.message ? " " + e.message : "") : "?"));
+            /* 2026-10-28 Tizen 6.0 上一首 FLAC 解成 50 MB 的 WAV 报 Format error，放成过的 WAV 都在 16 MB 以下：分不开「不认 WAV」和「太大」 */
+            var it = list[idx] || {}, mime = it.ext === "flac" ? "audio/wav" : mimeOf(it);
+            fail(token, "audio error " + (e ? e.code + (e.message ? " " + e.message : "") : "?") +
+                 "（" + mime + " canPlayType=" + (audio.canPlayType(mime) || "空") + "）");
         });
 
         var api = {};

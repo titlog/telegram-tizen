@@ -55,9 +55,18 @@ var TG = (function () {
         }
         return reconnecting;
     }
+    /* 这个会话没了：手机上「结束其他会话」、账号注销、太久没用被收回 —— 换条连接也没用，只能重新扫码。
+     * SESSION_PASSWORD_NEEDED 也是 401，那是两步验证，不算。2026-10-28 一台电视在这之后照常跑，每个请求都 401，
+     * 重开之后又拿这一行原来那人的上次来源去开别人的账号 */
+    function signedOut(e) { return /AUTH_KEY_UNREGISTERED|AUTH_KEY_INVALID|SESSION_REVOKED|SESSION_EXPIRED|USER_DEACTIVATED/.test(String(e && e.message)); }
+    /* 群 / 频道进不去了：退出了、被移出、改成私有、删了。电视上只能说清楚，不是出事 */
+    function noAccess(e) { return /CHANNEL_PRIVATE|CHANNEL_INVALID|PEER_ID_INVALID|USER_BANNED_IN_CHANNEL|CHAT_FORBIDDEN|CHAT_ID_INVALID/.test(String(e && e.message)); }
+    /* 到了主页之后会话没了：app.js 挂上的（回到扫码）；启动时 getMe 失败是「还没登录」，不归它管 */
+    var onSignedOut = null;
     async function again(fn) {
         try { return await fn(); }
         catch (e) {
+            if (onSignedOut && signedOut(e)) { var f = onSignedOut; onSignedOut = null; f(e); }
             if (!remake || !gone(e)) { throw e; }
             await reconnect();
             return await fn();
@@ -65,7 +74,9 @@ var TG = (function () {
     }
 
     async function me() {
-        try { return await again(function () { return client.getMe(); }); } catch (e) { return null; }
+        /* 没登录过也是这里 null；原因记一行，分得开「还没登录」「会话在别处被结束了」「连不上」 */
+        try { return await again(function () { return client.getMe(); }); }
+        catch (e) { Log.report("tg", "getMe 没答上：" + (e && e.message)); return null; }
     }
 
     /* 页面在卸载（扫码页按返回、换账号都是 reload）：mtcute 自己在这时销毁 port，同样是 stopSignal 中止，那不是作废，不重连 */
@@ -81,6 +92,12 @@ var TG = (function () {
             try {
                 return await client.signInQr({ onUrlUpdated: onUrl, onQrScanned: onScanned, password: askPassword, invalidPasswordCallback: onBadPassword });
             } catch (e) {
+                /* 扫上了、在问两步验证的时候 401 AUTH_KEY_UNREGISTERED（2026-10-28 一台 Tizen 9，扫码后五分多钟）：进了启动失败页。
+                 * 原因还不知道；重新出码让人再扫一次，日志那几行（扫上、要密码、交密码的时刻）留着下次分 */
+                if (!leaving && tries < 3 && signedOut(e)) {
+                    Log.report("tg", "扫码登录走到一半被 Telegram 拒了（" + (e && e.message) + "），重新出码");
+                    continue;
+                }
                 if (leaving || !remake || tries >= 3 || !(gone(e) || (client.stopSignal && client.stopSignal.aborted))) { throw e; }
                 Log.report("tg", "扫码时后台线程的连接作废了（" + (e && e.message) + "），重连、重新出码");
                 await reconnect();
@@ -500,6 +517,8 @@ var TG = (function () {
         mode: function () { return mode; },
         primaryDc: function () { return client.getPrimaryDcId(); },
         leaving: function () { return leaving; },
+        signedOut: signedOut, noAccess: noAccess,
+        onSignedOut: function (fn) { onSignedOut = fn; },
         /* 给自测（js/selftest.js --loginexpiry）扣消息用 */
         client: function () { return client; }
     };

@@ -69,6 +69,18 @@ var Accounts = (function () {
         write();
         return "对上了";
     }
+    /* 刚扫码登录的是另一个人：这一行原来那人的会话已经没了（在别处被结束），这个库现在是扫码的人的。这一行改成他，原来那人的
+     * 本地记录（上次的来源、看到哪里、来源栏的计数…）删掉 —— 留着就是拿那人的上次来源去开这个人的账号（2026-10-28 一台电视：
+     * PEER_ID_INVALID，屏幕上报错、当成出事传了上来）。改了返回 true；改完要重新加载页面（Store 在内存里还拿着旧的） */
+    function reassign(id, user) {
+        var a = byId(id);
+        if (!a || !user || !a.userId || a.userId === user.id) { return false; }
+        PERSONAL.forEach(function (k) { try { localStorage.removeItem(scope(k, id)); } catch (e) {} });
+        a.userId = 0;
+        a.name = "";
+        describe(id, user);
+        return true;
+    }
     /* 同一个人登录了两次（添加账号时扫的是已经在的账号）：返回已有的那一行 */
     function duplicateOf(id) {
         var a = byId(id);
@@ -92,6 +104,6 @@ var Accounts = (function () {
 
     return {
         active: active, list: function () { return st.list.slice(); }, prev: function () { return st.prev ? byId(st.prev) : null; },
-        scope: scope, add: add, switchTo: switchTo, remove: remove, describe: describe, duplicateOf: duplicateOf, cleanup: cleanup
+        scope: scope, add: add, switchTo: switchTo, remove: remove, describe: describe, reassign: reassign, duplicateOf: duplicateOf, cleanup: cleanup
     };
 })();

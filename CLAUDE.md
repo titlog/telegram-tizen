@@ -77,7 +77,7 @@ zsh tools/deploy.sh --music                      # 音乐在电视上走一遍�
 node ../bilibili-tizen/tools/diag-logs.mjs --app telegram-tizen   # 读别人电视传上来的（--device 编号 / <id>）
 zsh tools/release.sh                             # 发布包 → dist/telegram-tizen-<版本>.wgt
 node test/serve.mjs & node test/run.mjs media/a_h264_fast.mp4 "media/b_h264_moovend.mp4?start=30"   # 改 player.js 之后
-node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv / acct / music / history / report 只跑那一段，UILANG=en 英文界面）
+node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv / acct / music / history / report 只跑那一段，ONLY=gone 只在单跑时走（会改账号），UILANG=en 英文界面）
 ```
 **自测构建（--diag / --loginexpiry / --samples / --music）测完马上 `zsh tools/deploy.sh` 装回正常构建。**
 
@@ -105,7 +105,8 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
   issue、发布说明。** → [docs/自动更新与诊断日志.md](docs/自动更新与诊断日志.md)、[docs/发布包与API-ID.md](docs/发布包与API-ID.md)
 - **自动更新**：mtcute（`build/` 下任何东西）、hls.js 不随更新下发，改了就是换壳、`SHELL` 加一；只换打包目标、补 API 的例外改 `update/shell.json`
   的指纹（1.1.3、1.2.0 都是这样）。→ [docs/自动更新与诊断日志.md](docs/自动更新与诊断日志.md)
-- **多账号**：本地记录用 `Accounts.scope()`，认人看用户编号。→ [docs/多账号.md](docs/多账号.md)
+- **多账号**：本地记录用 `Accounts.scope()`，认人看用户编号。会话在别处被结束（401）回扫码页；扫码的是另一个人就把这一行改成他；
+  进不去的群 / 频道说清楚、不当出事、从来源栏拿掉。→ [docs/多账号.md](docs/多账号.md)
 - **README.md 是英文**（GitHub 默认展示），中文在 README.zh.md；截图两套。→ [docs/README截图.md](docs/README截图.md)
 - **电视上还没验证**：Tizen 5.0 / 5.5 / 6.x 真机；AC-3 有没有声音；换音轨重开停在原处；真遥控器的长按；下一集倒计时；切换界面语言；
   添加 / 切换 / 退出账号；在电视上用遥控器填 API ID。看到这些的日志再划掉。

@@ -87,9 +87,15 @@ var TG = (function () {
     /* 多账号：「我是谁」按当前账号的库答（tg-session-3 故意也是爸爸 —— 添加了一个已经在的账号）。扫码：stub.noscan 不在就 1.5 秒后自动「扫上」 */
     /* stub.failInit：连不上 Telegram（ONLY=report 看启动失败那一页） */
     init: async function () { if (localStorage.getItem("stub.failInit")) { throw new Error("WebSocket closed before the connection was established"); } },
+    /* 进不去的来源（id 7）、会话没了：和真的 tg.js 同一套判断 */
+    noAccess: function (e) { return /CHANNEL_PRIVATE|CHANNEL_INVALID|PEER_ID_INVALID|USER_BANNED_IN_CHANNEL|CHAT_FORBIDDEN|CHAT_ID_INVALID/.test(String(e && e.message)); },
+    signedOut: function (e) { return /AUTH_KEY_UNREGISTERED|AUTH_KEY_INVALID|SESSION_REVOKED|SESSION_EXPIRED|USER_DEACTIVATED/.test(String(e && e.message)); },
+    onSignedOut: function () {},
     mode: function () { return "stub"; },
+    /* stub.stranger：tg-session 扫上的是另一个人（这一行原来是爸爸，会话没了之后别人扫了码） */
     me: async function () {
       var USERS = { "tg-session": { id: 101, displayName: "爸爸" }, "tg-session-2": { id: 202, displayName: "妈妈" }, "tg-session-3": { id: 101, displayName: "爸爸" } };
+      if (localStorage.getItem("stub.stranger")) { USERS["tg-session"] = { id: 303, displayName: "陌生人" }; }
       var st = Accounts.active().storage, logged = JSON.parse(localStorage.getItem("stub.logged") || '["tg-session"]');
       return logged.indexOf(st) >= 0 ? USERS[st] : null;
     },
@@ -105,10 +111,12 @@ var TG = (function () {
       var st = Accounts.active().storage, logged = JSON.parse(localStorage.getItem("stub.logged") || '["tg-session"]');
       localStorage.setItem("stub.logged", JSON.stringify(logged.filter(function (x) { return x !== st; })));
     },
-    videoCount: async function (src) { await new Promise(function (r) { setTimeout(r, 150); }); return src === 3 || src === 4 ? 0 : 5; },
+    videoCount: async function (src) { await new Promise(function (r) { setTimeout(r, 150); }); if (src === 7) { throw new Error("Telegram API error 400: CHANNEL_PRIVATE"); } return src === 3 || src === 4 ? 0 : 5; },
     sources: async function () { return [{ id: "me", title: "Test", kind: "group" }, { id: 1, title: "视频分享群", kind: "group" }, { id: 4, title: "BotFather", kind: "user" },
-      { id: 2, title: "一个名字特别长的频道名字特别长的频道", kind: "channel" }, { id: 3, title: "空的群", kind: "group" }, { id: 6, title: "音乐频道", kind: "channel" }]; },
+      { id: 2, title: "一个名字特别长的频道名字特别长的频道", kind: "channel" }, { id: 3, title: "空的群", kind: "group" }, { id: 6, title: "音乐频道", kind: "channel" },
+      { id: 7, title: "退出了的频道", kind: "channel" }]; },
     videos: async function (src) { await new Promise(function (r) { setTimeout(r, 300); });
+      if (src === 7) { throw new Error("Telegram API error 400: CHANNEL_PRIVATE"); }
       var list = src === 3 ? [] : src === 6 ? MUSIC : src === 1 ? ITEMS.slice(0, 3) : ITEMS; return { items: list, next: undefined, total: list.length }; },
     links: async function (src) { return src === 3 || src === 1 || src === 6 ? [] : LINKS; },
     thumb: async function (it) { window.__thumbCall && window.__thumbCall(); if (it.file === "e_long_2h" || it.file === "c_hevc") { return null; }
@@ -550,5 +558,32 @@ if ((!process.env.ONLY || process.env.ONLY === 'mkv') && extra.some(x => x.path.
     await shot('28-mkv-' + i);
     await key(10009); await sleep(800);
   }
+}
+/* ---------- 进不去的来源、换了人扫码（ONLY=gone 才跑，会把账号改掉）：
+ * 上次的来源是退出了的频道（来源栏里还存着它的旧计数）→ 启动时提示一句、改开第一个有视频的、来源栏里没有它、不当出事；
+ * 这一行原来那人（爸爸）的会话没了、扫码的是陌生人 → 扫码页说爸爸的登录失效了，扫上之后这一行改成陌生人，爸爸的上次来源和进度删掉 ---------- */
+if (process.env.ONLY === 'gone') {
+  const ring = () => page.evaluate(() => Diag._test.ring().join('\n'));
+  await page.evaluate(() => { Store.setSrcCount(7, 3); localStorage.setItem('tg.lastSource.v1', JSON.stringify({ id: 7, title: '退出了的频道', kind: 'channel' })); });
+  await page.reload(); await sleep(1200);
+  const toastAt = await txt('#toast');
+  await sleep(2500);
+  await shot('40-gone-boot');
+  const g = await page.evaluate(() => ({ title: document.getElementById('src-title').textContent, last: (Store.lastSource() || {}).id,
+    rail: document.querySelector('#rail-list').textContent, count7: (Store.srcCount(7) || {}).n }));
+  const r1 = await ring();
+  console.log('  上次的来源进不去：提示「' + toastAt + '」，开的是「' + g.title + '」，上次的来源 ' + g.last + '，来源栏里' + (g.rail.includes('退出了的频道') ? '还有' : '没有') +
+    '它，计数 ' + g.count7 + '，日志' + (/改开第一个有视频的/.test(r1) ? '有' : '没有') + '「改开」那行，' + (/读不到来源里的视频/.test(r1) ? '当成了出事' : '没当出事'));
+
+  await page.evaluate(() => { Store.setProgress('old-person', 100, 600, '爸爸看的'); localStorage.setItem('stub.logged', '[]'); localStorage.setItem('stub.stranger', '1'); });
+  await page.reload(); await sleep(1000);
+  console.log('  会话没了，扫码页：' + await txt('#qrnote'));
+  await shot('41-signed-out');
+  await sleep(6000);
+  const a = await page.evaluate(() => ({ acct: Accounts.active().id + ':' + Accounts.active().name + ' id=' + Accounts.active().userId, rows: Accounts.list().length,
+    last: (Store.lastSource() || {}).title || '无', oldProgress: !!Store.getProgress('old-person'), screen: window.__app.screen() }));
+  const r2 = await ring();
+  console.log('  陌生人扫上之后：', JSON.stringify(a), '日志' + (/扫码登录的是另一个人/.test(r2) ? '有' : '没有') + '「另一个人」那行，' + (/对不上/.test(r2) ? '还有「对不上」' : '没有「对不上」'));
+  await page.evaluate(() => localStorage.removeItem('stub.stranger'));
 }
 await browser.close();
