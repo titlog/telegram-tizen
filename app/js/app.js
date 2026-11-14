@@ -201,7 +201,15 @@
         S.srcLoading = true;
         srcAt = Date.now();
         var tList = performance.now(), listMs;
-        try { list = await TG.sources(40); listMs = Math.round(performance.now() - tList); } catch (e) { S.srcLoading = false; R("来源列表出错 " + errStr(e)); return; }
+        try { list = await TG.sources(40); }
+        catch (e) {
+            /* 连接作废（醒来那一秒，见 openSource）：重连再取一次，不然要等下一个五分钟 */
+            if (!TG.gone(e)) { S.srcLoading = false; R("来源列表出错 " + errStr(e)); return; }
+            R("来源列表出错 " + errStr(e) + "，重连后再取一次");
+            try { await TG.recover(); list = await TG.sources(40); }
+            catch (e2) { S.srcLoading = false; R("来源列表又出错 " + errStr(e2)); return; }
+        }
+        listMs = Math.round(performance.now() - tList);
         S.allSources = list;
         var before = S.sources.map(function (s) { return s.id; }).join(",");
         function refresh() {
@@ -218,9 +226,12 @@
         }
         refresh();
         var t0 = performance.now(), probed = 0, withVideo = 0, i = 0;
+        /* 一个一个问、中间歇一下：一个会话三次搜索，原来两路并行，39 个会话不到 5 秒问了一百多次，接着点开的来源就全是
+         * FLOOD_WAIT（11-13 一台电视）。这一圈是后台的事，慢一点只是来源栏晚一点长全；每 5 分钟还要再来一圈 */
         async function worker() {
             while (i < list.length) {
                 var s = list[i++];
+                if (probed) { await new Promise(function (r) { setTimeout(r, 300); }); }
                 try {
                     var n = await TG.videoCount(s.id);
                     Store.setSrcCount(s.id, n);
@@ -236,7 +247,7 @@
                 }
             }
         }
-        await Promise.all([worker(), worker()]);
+        await worker();
         await refreshWebSources(list);
         S.srcLoading = false;
         var after = S.sources.map(function (s) { return s.id; }).join(",");
@@ -402,9 +413,22 @@
             links = await linksP;
         } catch (e) {
             if (g !== S.gen) { return; }
+            /* 连接作废（多半是电视待机醒来，后台线程的连接还是睡前那条）：重连，再开一次，不当出事。11-11 一台 Tizen 9 醒来那一秒
+             * 「读不到来源里的视频：Worker connection expired」传了上来，一秒后同一个来源自己开好了 */
+            if (TG.gone(e) && !(opts && opts.reopened)) {
+                R("来源「" + Diag.priv(src.title) + "」出错 " + errStr(e) + "，重连后再开一次");
+                await TG.recover();
+                if (g !== S.gen) { return; }
+                return openSource(src, Object.assign({}, opts, { reopened: true }));
+            }
             S.loading = false;
             R("来源「" + Diag.priv(src.title) + "」出错 " + errStr(e));
             $("src-sub").textContent = "";
+            /* tg.js 已经照 FLOOD_WAIT 等过两回还是要等：说清楚，不当出事 */
+            if (TG.floodWait(e)) {
+                $("empty").innerHTML = T("Telegram 让等一会儿（{0} 秒）再取，按确认重试", TG.floodWait(e));
+                return;
+            }
             if (TG.noAccess(e)) {
                 /* 退出了、被移出、改成私有、删了：说清楚、不放 issue 码、不当出事，从来源栏拿掉，开机不再去开它
                  * （2026-10-28 一台电视在一个退出了的频道上点了四次，四次都是原始错误加码、传了上来） */
@@ -1159,7 +1183,10 @@
         if (S.playing !== it) { return; }
         var pref = Store.getPrefs(it.fileKey);
         if (!web) {
+            /* 类型和扩展名照写（不是隐私）：「不认识的文件格式」那几份上传分不出是 AVI 还是 TS，就差这个 */
+            var ext = (/\.([a-z0-9]{2,4})$/i.exec(it.fileName || "") || [])[1], kind = [it.mime || "", ext ? "." + ext : ""].filter(Boolean).join(" ");
             R((again ? "换音轨重开「" : "播放「") + Diag.priv(it.title) + "」" + fmtSize(it.size) + " " + fmtTime(it.duration) + (it.asFile ? "（文件 " + Diag.priv(it.fileName || it.mime) + "）" : "") +
+              (kind ? "，" + kind : "") +
               (startAt ? "，从 " + fmtTime(startAt) + (again ? "" : " 接着放") : "") + (moov ? "，" + (moov.mkv ? "MKV 头" : "moov") + "有缓存" : "") + (opts.audio || pref.audio ? "，音轨 " + (opts.audio || pref.audio) : "") +
               (it.alts && it.alts.length ? "，备选清晰度 " + it.alts.map(function (a) { return a.w + "x" + a.h + " " + (a.codec || "?") + " " + fmtSize(a.size); }).join(" / ") : ""));
             if (startAt && !again) { toast(T("从 {0} 接着放", fmtTime(startAt))); }

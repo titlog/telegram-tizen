@@ -7,7 +7,7 @@
  * 取消添加。只停心跳不够：后台线程把请求也当心跳，扫码页每 30 秒换码要发请求，第一版停了 90 秒心跳连接都没作废。
  * 1.1.2 上这里 boot() 停住、二维码不再换（2026-10-23 一台别人的电视：「启动出错 signal is aborted without reason」）。
  *
- * --samples：README「拿什么试」那几部片（见 samplesRun）。
+ * --samples：README「拿什么试」那几部片（见 samplesRun），加上 test/media 里两部声音条目要改写的测试片（先开 RATE=0 LAT=0 node test/serve.mjs）。
  * 派发和遥控器一样的 keydown。最后一行 SELFTEST: 结束，全部通过 / N 步失败。⚠️ 测完马上 zsh tools/deploy.sh 装回正常构建。 */
 (function () {
     "use strict";
@@ -226,6 +226,26 @@
         }
     }
 
+    /* 这台电脑上 test/serve.mjs 给的测试片（RATE=0 LAT=0 node test/serve.mjs；生成命令在 test/check.mjs 头），和 sintel() 一样
+     * 只把这一部的 TG.source 换成 HTTP。11-14：声音条目是 QuickTime 写法（mp4a 在 wave 里）的、Opus 声道数和 dOps 对不上的，
+     * 电视的 MP4 解析器 init 段一进去就拒；mp4.js 改写成 ISO 写法之后要放得起来 */
+    async function localPlay(name, what) {
+        var url = String(REPORT_TO).replace(/:\d+\/?$/, ":8768") + "/test/media/" + name, orig = TG.source, src;
+        try { src = await Web.httpSource(url); }
+        catch (e) { check(what, false, "取不到 " + name + "（先开 RATE=0 LAT=0 node test/serve.mjs）：" + (e && e.message)); return; }
+        var it = { key: "selftest:" + name, fileKey: "selftest:" + name, title: name + "（自测）", fileName: name, asFile: true, size: src.size,
+                   duration: 12, date: new Date(), msg: { id: 0, chat: { id: 0 } }, info: { year: "", rating: "", director: "" }, mime: "video/mp4", http: url };
+        TG.source = function (x) { return x.http ? src : orig(x); };
+        try {
+            Store.setProgress(it.fileKey, 0, 12, it.title);
+            var t0 = Date.now();
+            window.__app.play(it);
+            var ok = await until(playing(1), 30000);
+            check(what, !!ok, ok ? (Date.now() - t0) + "ms 走起来，" + vid().videoWidth + "x" + vid().videoHeight + "，提示「" + txt("toast") + "」" : "30 秒没走起来：" + stateNow());
+            await backHome();
+        } finally { TG.source = orig; }
+    }
+
     async function samplesRun() {
         R("开始（界面 " + I18n.lang + "）");
         var home = await until(function () { return window.__app.screen() === "home" ? true : null; }, 60000);
@@ -239,6 +259,8 @@
                 } catch (e) { check("解析 archive.org " + IA[i], false, Math.round(performance.now() - t0) + "ms，" + e.message); }
             }
             check("卡片标题去掉站名", Web.title("https://archive.org/details/x", "His Girl Friday : Free Download, Borrow, and Streaming : Internet Archive") === "His Girl Friday");
+            await localPlay("g_qt_wave.mov", "QuickTime 写法的声音条目（mp4a 在 wave 里）放起来");
+            await localPlay("h_opus_chmismatch.mp4", "Opus 条目的声道数和 dOps 对不上的放起来");
             await webPlay("Sita_Sings_the_Blues", true);
             await webPlay("TheGeneral1926", false);
             await sintel();

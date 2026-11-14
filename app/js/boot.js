@@ -165,7 +165,31 @@ var Boot = (function () {
         for (var i = 0; i < SCRIPTS.length; i++) { tag("js/" + pkg(SCRIPTS[i])); }
     }
 
-    if (typeof document !== "undefined" && document.write) {
+    /* Tizen 4.0 及更早（Chromium 56）：没有 WebAssembly，mtcute 两份都跑不起来，我们自己的代码里也有它解析不了的语法。
+     * 11-01…03 埃及、越南五台 Tizen 4.0 装了 1.2.6：一片 js 错误、屏幕上「mtcute 没加载起来，要重装」—— 重装也没用。
+     * 什么都不加载，直接说电视太老。diag.js 也没加载，什么都不传：这不是出事 */
+    var TOO_OLD = typeof WebAssembly === "undefined";
+    function tooOld() {
+        var zh = /^zh/i.test(navigator.language || ""), tz = (/Tizen ([\d.]+)/.exec(navigator.userAgent) || [])[1] || "?";
+        var t = zh ? ["这台电视太老了，这个应用放不了",
+                      "要 Tizen 5.0 以上的三星电视（大约 2019 年以后的型号），这台是 Tizen " + tz + "。",
+                      "按返回键退出"]
+                   : ["This TV is too old for this app",
+                      "It needs a Samsung TV with Tizen 5.0 or newer (roughly 2019 models onward). This one runs Tizen " + tz + ".",
+                      "Press Back to exit"];
+        document.write('<div style="position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:#000;color:#eee;' +
+                       'font-family:sans-serif;padding:300px 200px">' +
+                       '<div style="font-size:56px">' + t[0] + '</div><div style="font-size:34px;color:#aaa;margin-top:30px">' + t[1] +
+                       '</div><div style="font-size:30px;color:#777;margin-top:60px">' + t[2] + '</div></div>');
+        document.addEventListener("keydown", function (e) {
+            if (e.keyCode === 10009) { try { tizen.application.getCurrentApplication().exit(); } catch (x) {} }
+        });
+    }
+
+    if (typeof document !== "undefined" && document.write && TOO_OLD) {
+        info.note = "电视太老（没有 WebAssembly），什么都没加载";
+        tooOld();
+    } else if (typeof document !== "undefined" && document.write) {
         var chosen = null;
         try { chosen = choose(); }
         catch (e) { info.note = "选代码时出错：" + (e && e.message) + "，用安装包"; }

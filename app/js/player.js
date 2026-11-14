@@ -103,6 +103,8 @@ var Player = (function () {
         var api = {};
 
         var lastPhase = "";
+        function knownErr(msg) { var e = new Error(msg); e.known = true; return e; }
+        function hexHead(a) { var s = ""; for (var i = 0; i < a.length; i++) { s += (a[i] < 16 ? "0" : "") + a[i].toString(16) + (i % 4 === 3 ? " " : ""); } return s.trim(); }
         /* known：出错的原因是知道的（电视的限制），屏幕上说清楚就好，不当出事上传 */
         function state(phase, msg, known) {
             if (phase === lastPhase && !msg) { return; }
@@ -120,6 +122,17 @@ var Player = (function () {
             return v && /^avc/.test(v.codec || "") && v.height > 1088 ? v : null;
         }
         function tallOk() { try { return localStorage.getItem(TALL_KEY) === "1"; } catch (e) { return false; } }
+
+        /* 10 位 / 4:2:2 / 4:4:4 的 H.264（High 10 = avc1.6e…，常见于动画压制）：电视的硬件解码器只解 8 位 4:2:0 的 —— 11-11 一台
+         * Tizen 9 上 MKV 里的 avc1.6e0032 出画面前 DECODER_ERROR_NOT_SUPPORTED，11-02 一台 Tizen 4.0 上 MP4 里的 avc1.6e0015 是 code=3
+         * （封面帧那边浏览器的软件解码解得了）。出画面前解码出错、又是这几档，就当成电视的限制 */
+        var HIGH_H264 = { "6e": "High 10", "7a": "High 4:2:2", "f4": "High 4:4:4" };
+        function highH264(sess) {
+            var v = null;
+            sess.tracks.forEach(function (T) { if (T.tr.kind === "video") { v = T.tr; } });
+            var m = v && /^avc[13]\.([0-9a-f]{2})/i.exec(v.codec || "");
+            return m && HIGH_H264[m[1].toLowerCase()] ? { tr: v, name: HIGH_H264[m[1].toLowerCase()] } : null;
+        }
 
         /* 音轨放不放得了。FLAC：电视的 MSE 说认（isTypeSupported 是 true），数据也进得去，可从来不解 —— readyState 停在 1，
          * 只有音频、配了视频都一样（2026-10-26 deploy.sh --music 实测；AAC 同样的放法没事）。MKV 里 FLAC 音轨的片子以前会一直卡在
@@ -185,6 +198,12 @@ var Player = (function () {
             if (tall) {
                 R("高 " + tall.height + " 的 H.264（" + tall.codec + "），这台电视没放成过这么高的：当成解码器的限制，不当出事");
                 state("error", tx("这台电视解不了高度超过 1080 的 H.264 视频（这部是 {0}）", tall.width + "x" + tall.height), true);
+                return;
+            }
+            var high = e && (e.code === 3 || e.code === 4) && !S.firstFrameMs ? highH264(S) : null;
+            if (high) {
+                R(high.name + " 档的 H.264（" + high.tr.codec + "）出画面前解码出错：当成电视的限制，不当出事");
+                state("error", tx("这台电视解不了 {0} 档的 H.264 视频", high.name), true);
                 return;
             }
             state("error", msg);
@@ -458,9 +477,11 @@ var Player = (function () {
                             startStream(main, pos, step);
                             return false;
                         }
-                        if (h.type === "moof") { reject(new Error(tx("已经是分段 MP4（fragmented），还不支持"))); return false; }
+                        if (h.type === "moof") { reject(knownErr(tx("已经是分段 MP4（fragmented），还不支持"))); return false; }
                         /* 开头就不像盒子（AVI 的 RIFF、TS 的 0x47…）：别顺着乱七八糟的「大小」一路跳到文件尾 */
                         if (pos === 0 && (h.size < 8 || h.size > sess.source.size || !/^[\x20-\x7e]{4}$/.test(h.type))) {
+                            /* 11-04…13 六份上传只有这一句，是 AVI、TS 还是别的看不出来：把文件开头记下来（魔数，不是内容） */
+                            R("不认识的文件格式，开头 16 字节 " + hexHead(win.read(0, Math.min(16, win.endOff))));
                             reject(new Error(tx("不认识的文件格式（不是 MP4 也不是 MKV）")));
                             return false;
                         }
@@ -519,8 +540,8 @@ var Player = (function () {
                         watchFirstFrame(sess, resolve, reject);
                     }).catch(function (e) {
                         if (S !== sess) { return; }
-                        R("打不开：" + errStr(e));
-                        state("error", errStr(e));
+                        R("打不开：" + errStr(e) + (e && e.known ? "（电视或格式的限制，不当出事）" : ""));
+                        state("error", errStr(e), !!(e && e.known));
                         reject(e);
                     });
                 }, { once: true });
@@ -554,7 +575,7 @@ var Player = (function () {
                 var ok = !tr.unsupported && MediaSource.isTypeSupported(tr.mime);
                 if (tr.kind === "video" && !v) { if (ok) { v = tr; } else { notes.push(tr.unsupported ? tx(tr.unsupported) : tx("视频 {0} 放不了", tr.codec)); } }
             });
-            if (!v) { throw new Error(notes.join(tx("；")) || tx("没有视频轨")); }
+            if (!v) { throw knownErr(notes.join(tx("；")) || tx("没有视频轨")); }
             /* 音轨：tkhd 里 enabled 的那条是默认（多音轨的 MP4 只开一条） */
             sess.audios = mv.tracks.filter(function (tr) { return tr.kind === "audio"; }).map(function (tr) {
                 var ok = !tr.unsupported && audioOk(tr);
@@ -700,7 +721,7 @@ var Player = (function () {
                 if (t.kind !== "video" || v) { return; }
                 if (!t.unsupported && MediaSource.isTypeSupported(t.mime)) { v = t; } else { notes.push(t.unsupported ? tx(t.unsupported) : tx("视频 {0} 放不了", t.codec || t.codecId)); }
             });
-            if (!v) { throw new Error(notes.join(tx("；")) || tx("没有视频轨")); }
+            if (!v) { throw knownErr(notes.join(tx("；")) || tx("没有视频轨")); }
             sess.audios = info.tracks.filter(function (t) { return t.kind === "audio"; }).map(function (t) {
                 var ok = !t.unsupported && !!t.mime && audioOk(t);
                 return { key: "a:" + t.num, mk: t, lang: t.lang, name: t.name, codec: t.codec || t.codecId, channels: t.channels, ok: ok,
@@ -759,8 +780,10 @@ var Player = (function () {
             R(why + " → " + c.t.toFixed(1) + "s" + (exact > c.t ? "（停在 " + exact.toFixed(1) + "s）" : "") + "，从 " + mb(c.pos) + " 读" + (c.resync ? "（没有 Cues，按码率猜的）" : ""));
         }
 
+        /* 90 秒从头（moov / MKV 头）到手算起，不从按下播放算：11-04 一台 Tizen 5.5 的 MKV 头下了 219 秒，一到手就判「90 秒没出画面」、
+         * 一个媒体字节都没给机会；11-10 另一台文件尾的 moov 下了 77 秒，只剩 13 秒 */
         function watchFirstFrame(sess, resolve, reject) {
-            var started = false;
+            var started = false, since = performance.now();
             var tick = setInterval(function () {
                 if (S !== sess) { clearInterval(tick); return; }
                 if (!started && video.readyState >= 2) {
@@ -797,7 +820,7 @@ var Player = (function () {
                         }, 4000);
                     }
                 }
-                if (performance.now() - sess.t0 > 90000) {
+                if (performance.now() - since > 90000) {
                     clearInterval(tick);
                     /* 放弃了就别再取：2026-10-23 放弃之后下载还在每 10 秒重试一次，直到观众离开这个视频。 */
                     sess.lanes.forEach(stopLane);

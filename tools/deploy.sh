@@ -9,7 +9,8 @@
 #   zsh tools/deploy.sh --loginexpiry  扫码页上后台线程的连接作废（挂到后台一分钟以上）：添加一个账号去扫码页、停心跳等作废，
 #                                      看是不是重连、换码；最后按返回取消添加（js/selftest.js，2 分钟）
 #   zsh tools/deploy.sh --samples  README「拿什么试」那几部片在电视上走一遍：archive.org 的片子页（解析、1080p 连放、快进），
-#                                  Sintel 官方 MKV（AC-3 5.1、10 条字幕、GBK 中文外挂、长按菜单换字幕、快进），从网上直接读（js/selftest.js，3 分钟）
+#                                  Sintel 官方 MKV（AC-3 5.1、10 条字幕、GBK 中文外挂、长按菜单换字幕、快进），从网上直接读（js/selftest.js，3 分钟）；
+#                                  还有 test/media 里两部声音条目要改写的测试片（QuickTime 的 wave、Opus 声道数），先开 RATE=0 LAT=0 node test/serve.mjs
 #   zsh tools/deploy.sh --music    电视怎么放音频文件（MP3 / M4A / FLAC / Opus / WAV，blob 和 http 两种放法）；先开 RATE=0 LAT=0 node test/serve.mjs
 #   zsh tools/deploy.sh --legacy   在这台（有 BigInt 的）电视上强制用老电视那份 mtcute（tg.legacy.js），连 Telegram、取片子、下载放几秒；测完自己换回
 #   TG_UPDATE_MANIFEST=http://<这台电脑>:<端口>/manifest.json zsh tools/deploy.sh   在电视上测自动更新（只有开发构建认它）

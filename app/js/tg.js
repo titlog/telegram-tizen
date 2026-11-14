@@ -63,13 +63,24 @@ var TG = (function () {
     function noAccess(e) { return /CHANNEL_PRIVATE|CHANNEL_INVALID|PEER_ID_INVALID|USER_BANNED_IN_CHANNEL|CHAT_FORBIDDEN|CHAT_ID_INVALID/.test(String(e && e.message)); }
     /* 到了主页之后会话没了：app.js 挂上的（回到扫码）；启动时 getMe 失败是「还没登录」，不归它管 */
     var onSignedOut = null;
+    /* FLOOD_WAIT_N：Telegram 让等 N 秒。mtcute 自己只等 10 秒以内的，再长的抛出来 —— 11-13 一台电视来源栏扫完 39 个会话之后，
+     * 点开的来源全是 FLOOD_WAIT_15–21、当成出事传了。半分钟以内的照它说的等完再试 */
+    function floodWait(e) { var m = /FLOOD_WAIT_(\d+)/.exec(String(e && e.message)); return m ? +m[1] : 0; }
+    function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
     async function again(fn) {
-        try { return await fn(); }
-        catch (e) {
-            if (onSignedOut && signedOut(e)) { var f = onSignedOut; onSignedOut = null; f(e); }
-            if (!remake || !gone(e)) { throw e; }
-            await reconnect();
-            return await fn();
+        for (var round = 0; ; round++) {
+            try { return await fn(); }
+            catch (e) {
+                if (onSignedOut && signedOut(e)) { var f = onSignedOut; onSignedOut = null; f(e); }
+                var wait = floodWait(e);
+                if (wait && wait <= 30 && round < 2) {
+                    Log.report("tg", "Telegram 让等 " + wait + " 秒（FLOOD_WAIT），等完再试");
+                    await sleep(wait * 1000 + 500);
+                    continue;
+                }
+                if (!remake || !gone(e) || round >= 2) { throw e; }
+                await reconnect();
+            }
         }
     }
 
@@ -88,17 +99,21 @@ var TG = (function () {
      * 「Worker connection expired」，在两次换码之间时报「signal is aborted without reason」（port 的 stopSignal 被中止）。
      * 1.1.2 上 boot() 就停在这里、二维码不再换（2026-10-23 一台别人的电视；--loginexpiry 复现）。重连、重新出码，最多三次 */
     async function login(onUrl, onScanned, askPassword, onBadPassword) {
-        for (var tries = 0; ; tries++) {
+        for (var refused = 0, drops = 0; ;) {
             try {
                 return await client.signInQr({ onUrlUpdated: onUrl, onQrScanned: onScanned, password: askPassword, invalidPasswordCallback: onBadPassword });
             } catch (e) {
                 /* 扫上了、在问两步验证的时候 401 AUTH_KEY_UNREGISTERED（2026-10-28 一台 Tizen 9，扫码后五分多钟）：进了启动失败页。
                  * 原因还不知道；重新出码让人再扫一次，日志那几行（扫上、要密码、交密码的时刻）留着下次分 */
-                if (!leaving && tries < 3 && signedOut(e)) {
+                if (!leaving && refused < 3 && signedOut(e)) {
+                    refused++;
                     Log.report("tg", "扫码登录走到一半被 Telegram 拒了（" + (e && e.message) + "），重新出码");
                     continue;
                 }
-                if (leaving || !remake || tries >= 3 || !(gone(e) || (client.stopSignal && client.stopSignal.aborted))) { throw e; }
+                /* 连接作废的次数另算，扫码页开着就一直重连（半小时封顶）：11-09 一台 Tizen 5.0 在扫码页上每 70 秒作废一次，
+                 * 原来第四次就成了「启动出错」传上来；每次重连只要几毫秒 */
+                if (leaving || !remake || drops >= 30 || !(gone(e) || (client.stopSignal && client.stopSignal.aborted))) { throw e; }
+                drops++;
                 Log.report("tg", "扫码时后台线程的连接作废了（" + (e && e.message) + "），重连、重新出码");
                 await reconnect();
             }
@@ -517,7 +532,9 @@ var TG = (function () {
         mode: function () { return mode; },
         primaryDc: function () { return client.getPrimaryDcId(); },
         leaving: function () { return leaving; },
-        signedOut: signedOut, noAccess: noAccess,
+        signedOut: signedOut, noAccess: noAccess, gone: gone, floodWait: floodWait,
+        /* 连接作废之后由 app.js 叫：重连（后台线程模式才有），之后再发的请求走新连接 */
+        recover: function () { return remake ? reconnect() : Promise.resolve(); },
         onSignedOut: function (fn) { onSignedOut = fn; },
         /* 给自测（js/selftest.js --loginexpiry）扣消息用 */
         client: function () { return client; }

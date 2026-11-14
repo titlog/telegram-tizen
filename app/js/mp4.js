@@ -148,8 +148,15 @@ var Mp4 = (function () {
         do { x = b[o++]; len = (len << 7) | (x & 127); k++; } while ((x & 128) && k < 4);
         return { tag: tag, p: o, e: o + len };
     }
-    function mp4aCodec(b, entry, child0) {
+    /* mp4a 的 esds：ISO 写法是条目的直接子盒子，QuickTime 写法（苹果的编码器、手机）包在 wave 里 */
+    function esdsOf(b, entry, child0) {
         var e = child(b, { p: child0, e: entry.e }, "esds");
+        if (e) { return e; }
+        var w = child(b, { p: child0, e: entry.e }, "wave");
+        return w ? child(b, w, "esds") : null;
+    }
+    function mp4aCodec(b, entry, child0) {
+        var e = esdsOf(b, entry, child0);
         if (!e) { return "mp4a.40.2"; }
         var d = desc(b, e.p + 4);                       // ES_Descriptor
         if (d.tag !== 3) { return "mp4a.40.2"; }
@@ -186,6 +193,10 @@ var Mp4 = (function () {
             var ver = u16(b, entry.p + 8);             // QuickTime 声音条目有 v1 / v2，多 16 / 36 字节
             tr.channels = u16(b, entry.p + 16);
             tr.rate = u32(b, entry.p + 24) >>> 16;
+            if (ver === 2) {                           // v2 前面那两格是 3 和 1.0，真的值在后面：float64 采样率、u32 声道数
+                tr.rate = Math.round(new DataView(b.buffer, b.byteOffset + entry.p + 32, 8).getFloat64(0));
+                tr.channels = u32(b, entry.p + 40);
+            }
             var c0 = entry.p + 28 + (ver === 1 ? 16 : ver === 2 ? 36 : 0);
             if (t === "mp4a") { tr.codec = mp4aCodec(b, entry, c0); }
             else if (t === "ac-3" || t === "ec-3") { tr.codec = t; }
@@ -207,6 +218,51 @@ var Mp4 = (function () {
             var kids = tr.kind === "video" ? children(b, entry.p + 78, entry.e) : tr.kind === "audio" ? children(b, c0, entry.e) : [];
             tr.stsdNote = "stsd v" + b[stsd.p] + " " + u32(b, stsd.p + 4) + " 条 " + t + "[" + kids.map(function (k) { return k.type; }).join(",") + "]";
         } catch (e) { tr.stsdNote = "stsd 读不出：" + e.message; }
+        if (tr.kind === "audio" && !tr.unsupported) {
+            try {
+                var iso = isoAudio(b, entry, ver, c0, tr);
+                if (iso) { tr.stsd = iso.stsd; tr.stsdNote += "，改写成 ISO 的样子（" + iso.why + "）"; }
+            } catch (e) { tr.stsdNote += "，改写不了：" + e.message; }
+        }
+    }
+
+    /* 声音条目写成 ISO 的样子再进 init 段。电视的 MP4 解析器只认 ISO 那一种：
+     * - QuickTime 写法（v1 / v2 多出 16 / 36 字节，mp4a 的 esds 包在 wave 里）：2026-11-01…13 五台电视（Tizen 5.5–9.0）
+     *   这样的文件 init 段一进去就 stream parsing failed（stsdNote 全是 mp4a[wave]），同一种编码 ISO 写法的照常放。
+     *   10-28 两台 Tizen 9 的 CHUNK_DEMUXER_ERROR_APPEND_FAILED「像苹果编码器写的」多半也是它。
+     * - Opus 条目里的声道数和 dOps 对不上：「Opus AudioSampleEntry sample rate mismatches OpusSpecificBox STREAMINFO
+     *   channel count」（11-08 一台 Tizen 9，比的其实是声道数）。照 dOps 改。
+     * 已经是 ISO 写法、对得上的不动（返回 null）：原样拷是放得好好的那些片子走的路 */
+    function isoAudio(b, entry, ver, c0, tr) {
+        var kids = children(b, c0, entry.e), wave = null, dops = null;
+        kids.forEach(function (k) { if (k.type === "wave") { wave = k; } if (k.type === "dOps") { dops = k; } });
+        var why = [], ch = tr.channels, rate = tr.rate;
+        if (ver) { why.push("QuickTime v" + ver); }
+        if (wave) { why.push("esds 从 wave 里拿出来"); }
+        if (tr.format === "Opus" && dops && dops.e - dops.p >= 2) {
+            rate = 48000;
+            if (b[dops.p + 1] && b[dops.p + 1] !== ch) { why.push("声道数 " + ch + " → " + b[dops.p + 1] + "（照 dOps）"); ch = b[dops.p + 1]; }
+        }
+        if (!why.length) { return null; }
+        var keep = [];
+        kids.forEach(function (k) {
+            if (k.type === "wave") {
+                var es = child(b, k, "esds");
+                if (es) { keep.push(b.subarray(es.s, es.e)); }
+            } else if (/^(esds|dOps|dac3|dec3|dfLa|btrt)$/.test(k.type)) {
+                keep.push(b.subarray(k.s, k.e));
+            }                                          // chan 之类 QuickTime 才有的不要
+        });
+        if (tr.format === "mp4a" && !keep.some(function (k) { return type4(k, 4) === "esds"; })) { throw new Error("找不到 esds"); }
+        var fixed = raw(function (w) {
+            w.zeros(6); w.u16(u16(b, entry.p + 6));   // reserved、data_reference_index
+            w.zeros(8);                                // version 0、revision、vendor
+            w.u16(ch); w.u16(16); w.u16(0); w.u16(0);
+            w.u32(rate > 0 && rate < 65536 ? rate * 65536 : 0);
+        }, 28);
+        var ent = box(tr.format, fixed, concat(keep));
+        tr.channels = ch;
+        return { stsd: full("stsd", 0, 0, concat([raw(function (w) { w.u32(1); }, 4), ent])), why: why.join("，") };
     }
 
     /* ---------- 样本表 ---------- */

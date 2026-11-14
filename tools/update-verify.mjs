@@ -143,7 +143,7 @@ ok(/已经下载好了/.test(T.judge(m, ctx({ downloaded: "9.0.0" }))), "已经�
 
 /* ---------------- 3. boot.js launch decisions ---------------- */
 console.log("boot.js 启动时选哪份代码");
-function launch(store) {
+function launch(store, engine) {
   const written = [], bodyKids = [{ nodeName: "DIV" }, { nodeName: "#text" }, { nodeName: "SCRIPT" }, { nodeName: "SCRIPT" }];
   let inserted = "", styles = 0, reloaded = false, blobs = 0;
   const links = [{ parentNode: { removeChild() { links.removed = (links.removed || 0) + 1; } } },
@@ -158,12 +158,23 @@ function launch(store) {
   };
   const c = { document, localStorage: store, JSON, parseInt, Math, Date, String,
     Blob: function () {}, URL: { createObjectURL: () => "blob:" + (++blobs) }, location: { reload: () => { reloaded = true; } } };
+  Object.assign(c, engine || {});
   vm.createContext(c);
+  if (engine && engine.noWasm) { vm.runInContext("WebAssembly = undefined;", c); }
   vm.runInContext(bootSrc + "\nthis.Boot = Boot;", c);
   return { Boot: c.Boot, written, inserted, styles, linksRemoved: links.removed || 0, reloaded, kids: bodyKids };
 }
 const bundleText = JSON.stringify(bundle);
 const meta = (v, extra) => JSON.stringify(Object.assign({ version: v, shell: boot.shell }, extra));
+
+/* Tizen 4.0（Chromium 56）：没有 WebAssembly → 什么脚本都不写，只写一块「电视太老」（11-01…03 五台） */
+{
+  const old = launch(storage({ "tg.update.meta": "x" }), { noWasm: true, navigator: { language: "zh-CN", userAgent: "Mozilla/5.0 (SMART-TV; LINUX; Tizen 4.0)" } });
+  ok(old.written.length === 1 && !/<script/.test(old.written[0]) && /太老/.test(old.written[0]) && /Tizen 4\.0/.test(old.written[0]),
+     "没有 WebAssembly → 不加载脚本，只说电视太老（" + old.written.length + " 处写入）");
+  const en = launch(storage(), { noWasm: true, navigator: { language: "en-GB", userAgent: "Tizen 4.0" } });
+  ok(/too old/.test(en.written[0]), "系统语言不是中文 → 英文");
+}
 
 let s = storage();
 let r = launch(s);

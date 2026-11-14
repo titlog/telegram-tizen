@@ -90,6 +90,9 @@ var TG = (function () {
     /* 进不去的来源（id 7）、会话没了：和真的 tg.js 同一套判断 */
     noAccess: function (e) { return /CHANNEL_PRIVATE|CHANNEL_INVALID|PEER_ID_INVALID|USER_BANNED_IN_CHANNEL|CHAT_FORBIDDEN|CHAT_ID_INVALID/.test(String(e && e.message)); },
     signedOut: function (e) { return /AUTH_KEY_UNREGISTERED|AUTH_KEY_INVALID|SESSION_REVOKED|SESSION_EXPIRED|USER_DEACTIVATED/.test(String(e && e.message)); },
+    gone: function (e) { return /Worker connection (expired|closed)/.test(String(e && e.message)); },
+    floodWait: function (e) { var m = /FLOOD_WAIT_(\d+)/.exec(String(e && e.message)); return m ? +m[1] : 0; },
+    recover: function () { return Promise.resolve(); },
     onSignedOut: function () {},
     mode: function () { return "stub"; },
     /* stub.stranger：tg-session 扫上的是另一个人（这一行原来是爸爸，会话没了之后别人扫了码） */

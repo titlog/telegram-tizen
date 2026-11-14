@@ -1,5 +1,10 @@
 /* mp4.js 离线校验：解析结果对照 ffprobe；拼出来的 fMP4 交给 ffmpeg 解码，对照每个包的时间戳。
- *   node test/check.mjs test/media/*.mp4 */
+ *   node test/check.mjs test/media/*.mp4 test/media/*.mov
+ * 音频的 init 段必须是 ISO 写法（条目 version 0、没有 wave）：电视只认这一种（mp4.js 的 isoAudio）。QuickTime 写法的测试片：
+ *   ffmpeg -f lavfi -i testsrc=duration=12:size=640x360:rate=25 -f lavfi -i sine=frequency=440:duration=12 \
+ *     -c:v libx264 -g 25 -pix_fmt yuv420p -c:a aac -b:a 128k -ac 2 -f mov test/media/g_qt_wave.mov   （mp4a v1 + wave、chan）
+ * Opus 条目的声道数和 dOps 对不上的：同样的命令换 -c:a libopus -b:a 96k -movflags +faststart，输出 h_opus_chmismatch.mp4，
+ *   再把 Opus 条目里的 channelcount（条目开头往后第 24 字节，两字节）改成 1 */
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { execFileSync } from 'node:child_process';
@@ -49,6 +54,12 @@ for (const file of process.argv.slice(2)) {
     /* 拼成 fMP4：init + 每 ~1 秒一段 */
     const copy = (dst, o, off, size) => dst.set(b.subarray(off, off + size), o);
     const parts = [Mp4.initSegment(tr)];
+    if (tr.kind === 'audio') {
+      const init = Buffer.from(parts[0]), at = init.indexOf(tr.format, 8);
+      const ver = at > 0 ? init.readUInt16BE(at + 4 + 8) : -1;
+      if (ver !== 0 || init.indexOf('wave') >= 0) fail(`音频 init 段不是 ISO 写法（条目 version ${ver}${init.indexOf('wave') >= 0 ? '，还有 wave' : ''}）`);
+      if (tr.stsdNote) console.log('    ' + tr.stsdNote);
+    }
     let a = 0, seq = 1;
     t = performance.now();
     while (a < tr.n) {

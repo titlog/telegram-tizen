@@ -71,7 +71,8 @@ node test/compat.mjs                             # 改 build/src/compat.js 之�
 node test/apikey.mjs                             # 改 apikey.js、填写页、登录出错的处理之后（UILANG=en 英文）
 zsh tools/deploy.sh --diag                       # 诊断日志在电视上走一遍（7 步，1 分钟）；先开 PORT=8096 node ../bilibili-tizen/tools/diag-local.mjs
 zsh tools/deploy.sh --loginexpiry                # 扫码页上后台线程的连接作废，看是不是重连、换码（3 步，2 分钟；会添加一个账号再取消）
-zsh tools/deploy.sh --samples                    # README「拿什么试」那几部片在电视上走一遍：archive.org 解析 + 1080p 连放 + 快进，Sintel MKV + 字幕（16 步，2 分钟）
+zsh tools/deploy.sh --samples                    # README「拿什么试」那几部片在电视上走一遍：archive.org 解析 + 1080p 连放 + 快进，Sintel MKV + 字幕，
+                                                 # 加 test/media 里两部声音条目要改写的测试片（17 步，2 分钟）；先开 RATE=0 LAT=0 node test/serve.mjs
 zsh tools/deploy.sh --legacy                     # 在这台（有 BigInt 的）电视上强制用老电视那份 mtcute：正常那份、老那份各放同一部片子对照
 zsh tools/deploy.sh --music                      # 音乐在电视上走一遍：MP3 → FLAC（软件解）→ M4A，换歌、快进、返回接着放（7 步）；先开 RATE=0 LAT=0 node test/serve.mjs
 node ../bilibili-tizen/tools/diag-logs.mjs --app telegram-tizen   # 读别人电视传上来的（--device 编号 / <id>）
@@ -86,14 +87,17 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
 - **电视上的事只能看日志**（`tizen debug` 打不开）；桌面上测过不等于电视上好，用自测构建在电视上走一遍。
   **卸电视上的应用之前先列出来、对照各项目的 config.xml、问用户**（哔哩哔哩客户端的编号是 `BiliTvApp0.Bilibili`，被当成探测版卸过一次）。
   部署前 sdb 通道可能卡死，deploy.sh 会先试 `shell echo`。
-- **最低 Tizen 5.0（Chromium 63）**：mtcute 两份，boot.js 看 `typeof BigInt` 挑 —— 正常的 `tg.bundle.js`（chrome69，wasm 降成 MVP，API 补在
+- **最低 Tizen 5.0（Chromium 63）**，4.0 及更早 boot.js 直接说电视太老、什么都不加载：mtcute 两份，boot.js 看 `typeof BigInt` 挑 —— 正常的 `tg.bundle.js`（chrome69，wasm 降成 MVP，API 补在
   compat.js），没有 BigInt 的用 `tg.legacy.js`（大数换 JSBI，`build/legacy/`）。我们自己的代码按 63 写（syntax-verify 卡着；正则别用 `\p{}`、
   具名分组）。改了 mtcute 的版本，`build/legacy/patches.mjs` 会对不上、构建停下来，要重新对。→ [docs/老电视兼容.md](docs/老电视兼容.md)
 - **mtcute 在后台线程**；给它 wasm 先 `WebAssembly.compile`；下载没背压，靠 `throttle` 钩子；起点按 512KB 对齐；挂到后台一分钟以上连接作废，
-  要重连。→ [docs/播放引擎.md](docs/播放引擎.md)
+  要重连（打开来源、来源列表碰上了重连再来一次，不当出事）；`FLOOD_WAIT` 半分钟以内的等完再试。→ [docs/播放引擎.md](docs/播放引擎.md)、
+  [docs/多账号.md](docs/多账号.md)
 - **播放引擎**：自己写的 MP4 / MKV 解析 + MSE；按秒背压；音视频隔得远就分两路读；**三星的 MSE 不跨空档**，起点要落在音视频都有的地方；
   open GOP 跳转丢前导帧、先清缓冲再挪播放头；H.264 级别写小了改够、avcC 的 profile 写成 0 照 SPS 改；MKV 结尾 `ended` 不一定来；
-  **高过 1088 的 H.264 在 Tizen 5.5 / 6.0 上解不了**（说清楚、不当出事）。→ [docs/播放引擎.md](docs/播放引擎.md)
+  **高过 1088 的 H.264 在 Tizen 5.5 / 6.0 上解不了**（说清楚、不当出事）；10 位的 H.264（High 10）、开头就没有能放的视频轨、分段 MP4
+  也说清楚、不当出事。**声音条目进 init 段前改成 ISO 写法**（QuickTime 的 `wave`、Opus 声道数和 `dOps` 对不上，电视的解析器都拒，`isoAudio()`）。
+  → [docs/播放引擎.md](docs/播放引擎.md)
 - **电视解不了的音频**：DTS、TrueHD、ALAC，还有**嘴上说认的 FLAC**（MSE、`<audio>` 都不解）。视频里的 FLAC 音轨当放不了；
   音乐里的 FLAC 用 flac.js 软件解成 WAV；音乐里的 ALAC 下的时候看 moov 认出来、说清楚、跳下一首。→ [docs/音乐.md](docs/音乐.md)
 - **`video.src`（三星自己的播放器）放网上的 MP4 不可靠**：网页链接里的 MP4 走播放引擎（`Web.httpSource`）。音频做成 blob 给 `<audio>` 是好的。
