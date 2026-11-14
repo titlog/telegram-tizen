@@ -53,6 +53,15 @@ async function waitMoving(from, ms) {
     var p = Player.create(video, R, function (ph, msg) { states.push(ph + (msg ? ":" + msg : "")); });
     window.P = p;
     var t0 = performance.now();
+    /* starve=ms：一开始放就把主线程堵住这么久（老电视上主线程忙、出画面检测的计时器好几秒不跑，issue #4） */
+    if (q.get("starve")) {
+        video.addEventListener("playing", function once() {
+            video.removeEventListener("playing", once);
+            var until = performance.now() + +q.get("starve");
+            while (performance.now() < until) {}
+            R("主线程堵了 " + q.get("starve") + "ms，现在 t=" + video.currentTime.toFixed(2));
+        });
+    }
     try { await p.open(httpSource(url, size), { startAt: +(q.get("start") || 0) }); }
     catch (e) { R("RESULT open 失败 " + e.message); return; }
     R("RESULT 出画面 " + Math.round(performance.now() - t0) + "ms t=" + video.currentTime.toFixed(2));

@@ -832,9 +832,13 @@ var Player = (function () {
                         video.currentTime = b.start(0) + 0.001;
                     }
                 }
-                var base = sess.seekAt ? sess.seekAt.to : 0;
-                if (started && !video.paused && video.currentTime > base + 0.04 && video.currentTime < base + 5) {
+                var base = sess.seekAt ? sess.seekAt.to : 0, ct = video.currentTime;
+                /* 起点后 5 秒以外也算，只要在放、手上有当前帧（readyState≥2）：11-02 一台 Tizen 4.0 上一段 MKV 放到 19 秒了，还判
+                 * 「90 秒没出画面」关掉了（issue #4「放几秒就关」）—— 主线程忙，这个 20ms 一跳的计时器隔了好几秒才跑，错过了 5 秒那一窗 */
+                var late = ct >= base + 5 && video.readyState >= 2;
+                if (started && !video.paused && ct > base + 0.04 && (ct < base + 5 || late)) {
                     clearInterval(tick);
+                    if (late) { R("出画面检测晚了：播放头已经在 " + ct.toFixed(1) + "（起点 " + base.toFixed(1) + "），这段时间主线程被占着"); }
                     sess.firstFrameMs = Math.round(performance.now() - sess.t0);
                     R("到画面 " + sess.firstFrameMs + "ms（第一块 " + sess.firstChunkMs + "ms，" + (sess.fmt === "mkv" ? "MKV 头" : "moov") + " 到手 " + sess.moovMs + "ms，取了 " + mb(sess.bytes) + "）" +
                       video.videoWidth + "x" + video.videoHeight);
