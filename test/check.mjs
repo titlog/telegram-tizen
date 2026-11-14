@@ -3,6 +3,8 @@
  * 音频的 init 段必须是 ISO 写法（条目 version 0、没有 wave）：电视只认这一种（mp4.js 的 isoAudio）。QuickTime 写法的测试片：
  *   ffmpeg -f lavfi -i testsrc=duration=12:size=640x360:rate=25 -f lavfi -i sine=frequency=440:duration=12 \
  *     -c:v libx264 -g 25 -pix_fmt yuv420p -c:a aac -b:a 128k -ac 2 -f mov test/media/g_qt_wave.mov   （mp4a v1 + wave、chan）
+ * 分段 MP4：同样的输入 -c:v libx264 -g 25 -pix_fmt yuv420p -c:a aac -movflags frag_keyframe+empty_moov+default_base_moof test/media/l_frag.mp4
+ *   （再来一份 -movflags frag_keyframe+empty_moov 不带 default_base_moof 的 l_frag_old.mp4：基准偏移按老写法）
  * Opus 条目的声道数和 dOps 对不上的：同样的命令换 -c:a libopus -b:a 96k -movflags +faststart，输出 h_opus_chmismatch.mp4，
  *   再把 Opus 条目里的 channelcount（条目开头往后第 24 字节，两字节）改成 1 */
 import fs from 'node:fs';
@@ -31,7 +33,10 @@ for (const file of process.argv.slice(2)) {
   const moov = top.find(x => x.type === 'moov');
   console.log('  顶层: ' + top.map(x => `${x.type}@${x.start}+${x.size}`).join(' '));
   let t = performance.now();
-  const movie = Mp4.parseMoov(b.subarray(moov.start, moov.start + moov.size));
+  const moovBytes = b.subarray(moov.start, moov.start + moov.size);
+  /* 分段 MP4：整份交给它，从 moof 拼样本表（player.js 也是整份读进来） */
+  const movie = Mp4.isFragmented(moovBytes) ? Mp4.parseMoov(moovBytes, b) : Mp4.parseMoov(moovBytes);
+  if (movie.fragmented) console.log(`  分段 MP4：${movie.fragmented} 个 moof`);
   console.log(`  parseMoov ${(performance.now() - t).toFixed(0)}ms，moov ${(moov.size / 1048576).toFixed(2)}MB，时长 ${movie.duration.toFixed(2)}s`);
 
   for (const tr of movie.tracks) {
@@ -87,7 +92,8 @@ for (const file of process.argv.slice(2)) {
     const firstPts = Mp4.pts(tr, tr.cto ? Array.from(tr.cto.keys()).reduce((m, i) => Mp4.pts(tr, i) < Mp4.pts(tr, m) ? i : m, 0) : 0);
     console.log(`    相对 pts 最大偏差 ${(maxd * 1000).toFixed(2)}ms（ffmpeg 整体挪了 ${(off * 1000).toFixed(1)}ms），按我们的时间戳首帧 ${firstPts.toFixed(4)}s`);
     if (maxd > 0.002) fail('pts 对不上');
-    if (tr.kind === 'video' && Math.abs(firstPts) > 0.001) fail('视频首帧不在 0');
+    /* 首帧落在 0 靠的是 edit list；分段 MP4 常没有（ffmpeg 的 empty_moov 就没写），那就照文件说的（ffmpeg 读出来也一样），开头空档播放器会跳 */
+    if (tr.kind === 'video' && Math.abs(firstPts) > 0.001 && !(movie.fragmented && !tr.shift)) fail('视频首帧不在 0');
     const gotKeys = got.filter(p => p.key).length;
     if (gotKeys !== (tr.keys ? tr.keys.length : tr.n)) fail(`拼完关键帧 ${gotKeys}`);
 

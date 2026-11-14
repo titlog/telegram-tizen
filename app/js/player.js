@@ -104,6 +104,23 @@ var Player = (function () {
 
         var lastPhase = "";
         function knownErr(msg) { var e = new Error(msg); e.known = true; return e; }
+        /* 整份已经在内存里的文件（分段 MP4），和 TG.source 一样的接口；照样听 throttle（不然一下子全塞进各路的窗口） */
+        var FRAG_MAX = 64 * 1048576;
+        function memSource(buf) {
+            return {
+                size: buf.length,
+                stream: function (offset, signal, throttle) {
+                    var start = Math.floor(offset / CH) * CH;
+                    return { start: start, iter: (async function* () {
+                        for (var o = start; o < buf.length; o += CH) {
+                            if (throttle) { await throttle(); }
+                            if (signal && signal.aborted) { return; }
+                            yield buf.subarray(o, Math.min(buf.length, o + CH));
+                        }
+                    })() };
+                }
+            };
+        }
         function hexHead(a) { var s = ""; for (var i = 0; i < a.length; i++) { s += (a[i] < 16 ? "0" : "") + a[i].toString(16) + (i % 4 === 3 ? " " : ""); } return s.trim(); }
         /* known：出错的原因是知道的（电视的限制），屏幕上说清楚就好，不当出事上传 */
         function state(phase, msg, known) {
@@ -477,7 +494,7 @@ var Player = (function () {
                             startStream(main, pos, step);
                             return false;
                         }
-                        if (h.type === "moof") { reject(knownErr(tx("已经是分段 MP4（fragmented），还不支持"))); return false; }
+                        if (h.type === "moof") { reject(knownErr(tx("分段 MP4 的 moov 不在开头，还不支持"))); return false; }
                         /* 开头就不像盒子（AVI 的 RIFF、TS 的 0x47…）：别顺着乱七八糟的「大小」一路跳到文件尾 */
                         if (pos === 0 && (h.size < 8 || h.size > sess.source.size || !/^[\x20-\x7e]{4}$/.test(h.type))) {
                             /* 11-04…13 六份上传只有这一句，是 AVI、TS 还是别的看不出来：把文件开头记下来（魔数，不是内容） */
@@ -530,10 +547,25 @@ var Player = (function () {
                             if (!m.cached && opts.onMoov) { try { opts.onMoov({ mkv: info }); } catch (e) {} }
                             setupMkv(sess, info, Math.round(performance.now() - tm), !!m.cached, opts);
                         } else {
-                            sess.movie = Mp4.parseMoov(m.bytes);
+                            var frag = Mp4.isFragmented(m.bytes);
+                            if (frag) {
+                                /* 分段 MP4（moov 里有 mvex，样本在后面一个个 moof 里）：整份读进来、从 moof 拼出样本表，之后和普通 MP4
+                                 * 一样放（拼段、跳转都不用分）。11-12 一台孟加拉的 Tizen 9 上一段 4 MB 的。太大的整份读不起，照旧说清楚 */
+                                if (source.size > FRAG_MAX) { throw knownErr(tx("超过 {0} MB 的分段 MP4（fragmented）还不支持", FRAG_MAX / 1048576)); }
+                                stopLane(sess.lanes[0]);
+                                var tf = performance.now(), whole = await readRange(source, 0, source.size);
+                                if (S !== sess) { return; }
+                                sess.source = memSource(whole);
+                                R("分段 MP4：整份 " + mb(whole.length) + " " + Math.round(performance.now() - tf) + "ms 读进来，从 moof 拼样本表");
+                                tm = performance.now();
+                                m = { start: m.start, bytes: m.bytes, atHead: false };
+                                sess.movie = Mp4.parseMoov(m.bytes, whole);
+                            } else {
+                                sess.movie = Mp4.parseMoov(m.bytes);
+                            }
                             var parseMs = Math.round(performance.now() - tm);
                             sess.moovMs = Math.round(tm - sess.t0);
-                            if (!m.cached && opts.onMoov) { try { opts.onMoov({ start: m.start, bytes: m.bytes }); } catch (e) {} }
+                            if (!m.cached && !frag && opts.onMoov) { try { opts.onMoov({ start: m.start, bytes: m.bytes }); } catch (e) {} }
                             setup(sess, m, parseMs, opts);
                         }
                         if (opts.onTracks) { try { opts.onTracks(api.tracks()); } catch (e) {} }

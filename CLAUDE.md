@@ -72,9 +72,9 @@ node test/apikey.mjs                             # 改 apikey.js、填写页、�
 zsh tools/deploy.sh --diag                       # 诊断日志在电视上走一遍（7 步，1 分钟）；先开 PORT=8096 node ../bilibili-tizen/tools/diag-local.mjs
 zsh tools/deploy.sh --loginexpiry                # 扫码页上后台线程的连接作废，看是不是重连、换码（3 步，2 分钟；会添加一个账号再取消）
 zsh tools/deploy.sh --samples                    # README「拿什么试」那几部片在电视上走一遍：archive.org 解析 + 1080p 连放 + 快进，Sintel MKV + 字幕，
-                                                 # 加 test/media 里两部声音条目要改写的测试片（17 步，2 分钟）；先开 RATE=0 LAT=0 node test/serve.mjs
+                                                 # 加 test/media 里两部声音条目要改写的、一段分段 MP4（18 步，2 分钟）；先开 RATE=0 LAT=0 node test/serve.mjs
 zsh tools/deploy.sh --legacy                     # 在这台（有 BigInt 的）电视上强制用老电视那份 mtcute：正常那份、老那份各放同一部片子对照
-zsh tools/deploy.sh --music                      # 音乐在电视上走一遍：MP3 → FLAC（软件解）→ M4A，换歌、快进、返回接着放（7 步）；先开 RATE=0 LAT=0 node test/serve.mjs
+zsh tools/deploy.sh --music                      # 音乐在电视上走一遍：MP3 → FLAC（软件解）→ M4A，换歌、快进、返回接着放，<audio> 不收的 WAV 改用 Web Audio（11 步）；先开 RATE=0 LAT=0 node test/serve.mjs
 node ../bilibili-tizen/tools/diag-logs.mjs --app telegram-tizen   # 读别人电视传上来的（--device 编号 / <id>）
 zsh tools/release.sh                             # 发布包 → dist/telegram-tizen-<版本>.wgt
 node test/serve.mjs & node test/run.mjs media/a_h264_fast.mp4 "media/b_h264_moovend.mp4?start=30"   # 改 player.js 之后
@@ -96,10 +96,10 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
 - **播放引擎**：自己写的 MP4 / MKV 解析 + MSE；按秒背压；音视频隔得远就分两路读；**三星的 MSE 不跨空档**，起点要落在音视频都有的地方；
   open GOP 跳转丢前导帧、先清缓冲再挪播放头；H.264 级别写小了改够、avcC 的 profile 写成 0 照 SPS 改；MKV 结尾 `ended` 不一定来；
   **高过 1088 的 H.264 在 Tizen 5.5 / 6.0 上解不了**（说清楚、不当出事）；10 位的 H.264（High 10）、开头就没有能放的视频轨、分段 MP4
-  也说清楚、不当出事。**声音条目进 init 段前改成 ISO 写法**（QuickTime 的 `wave`、Opus 声道数和 `dOps` 对不上，电视的解析器都拒，`isoAudio()`）。
+  也说清楚、不当出事；**分段 MP4 64 MB 以内整份读进来、从 moof 拼样本表**（`parseMoov(moov, 整份)`）。**声音条目进 init 段前改成 ISO 写法**（QuickTime 的 `wave`、Opus 声道数和 `dOps` 对不上，电视的解析器都拒，`isoAudio()`）。
   → [docs/播放引擎.md](docs/播放引擎.md)
 - **电视解不了的音频**：DTS、TrueHD、ALAC，还有**嘴上说认的 FLAC**（MSE、`<audio>` 都不解）。视频里的 FLAC 音轨当放不了；
-  音乐里的 FLAC 用 flac.js 软件解成 WAV；音乐里的 ALAC 下的时候看 moov 认出来、说清楚、跳下一首。→ [docs/音乐.md](docs/音乐.md)
+  音乐里的 FLAC 用 flac.js 软件解成 WAV（`<audio>` 不收的大 WAV 改用 Web Audio 放，`pcmPlayer`）；音乐里的 ALAC 下的时候看 moov 认出来、说清楚、跳下一首。→ [docs/音乐.md](docs/音乐.md)
 - **`video.src`（三星自己的播放器）放网上的 MP4 不可靠**：网页链接里的 MP4 走播放引擎（`Web.httpSource`）。音频做成 blob 给 `<audio>` 是好的。
   → [docs/网页链接.md](docs/网页链接.md)
 - **遥控器**：长按确认 650ms 开菜单，按住时的自动重复不算新的一下；在卡片上按确认进播放器 / 音乐画面，那一下的重复和松开也落在里面，
@@ -107,7 +107,8 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
 - **界面文字**：写中文、套 `T()`（app.js）/ `tx()`（别的文件），英文在 i18n.js；`test/i18n.mjs` 卡着。→ [docs/界面.md](docs/界面.md)
 - **隐私**：往日志放群名、片名、文件名、搜索词、地址、账号名、ID 一律 `Diag.priv()`，diag-verify 卡着。**API ID / Hash 不进仓库、日志、
   issue、发布说明。** → [docs/自动更新与诊断日志.md](docs/自动更新与诊断日志.md)、[docs/发布包与API-ID.md](docs/发布包与API-ID.md)
-- **自动更新**：mtcute（`build/` 下任何东西）、hls.js 不随更新下发，改了就是换壳、`SHELL` 加一；只换打包目标、补 API 的例外改 `update/shell.json`
+- **自动更新**：用更新包启动、两秒内出了 js 错误的下次退回安装包；没出错就没了的再给一次，连着两次才标坏（boot.js，只随安装包走）。
+  手动上传不到 5 行不传。mtcute（`build/` 下任何东西）、hls.js 不随更新下发，改了就是换壳、`SHELL` 加一；只换打包目标、补 API 的例外改 `update/shell.json`
   的指纹（1.1.3、1.2.0 都是这样）。→ [docs/自动更新与诊断日志.md](docs/自动更新与诊断日志.md)
 - **多账号**：本地记录用 `Accounts.scope()`，认人看用户编号。会话在别处被结束（401）回扫码页；扫码的是另一个人就把这一行改成他；
   进不去的群 / 频道说清楚、不当出事、从来源栏拿掉。→ [docs/多账号.md](docs/多账号.md)

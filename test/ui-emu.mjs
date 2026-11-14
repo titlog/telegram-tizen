@@ -459,6 +459,23 @@ if ((!process.env.ONLY || process.env.ONLY === 'music') && musicItems.length) {
   await key(13); await sleep(800);
   const a2 = await mu();
   console.log('  点同一张回到画面：' + JSON.stringify(a2) + (a2.t >= a1.t ? '（接着放，没重来）' : ' ✗ 重来了'));
+  /* 大 WAV 走 Web Audio（11-13 越南一台 Tizen 6.0：42–52 MB 的 WAV <audio> 不收）：让 <audio> 假装不收，FLAC 那首照样走、暂停、接着放、快进 */
+  const fi = musicItems.findIndex((m) => m.ext === 'flac');
+  if (fi >= 0) {
+    const am = () => page.evaluate(() => window.__app.music());
+    await key(10009); await sleep(600);
+    await page.evaluate(() => Music.test.rejectWav(true));
+    await key(39, fi); await key(13);
+    let w0 = null; for (let i = 0; i < 40 && !(w0 && w0.time > 1.5); i++) { await sleep(250); w0 = await am(); }
+    await key(13); await sleep(800); const p1 = await am(); await sleep(800); const p2 = await am();
+    await key(13); await sleep(1200); const r1 = await am();
+    await key(39); await sleep(1200); const s1 = await am();
+    console.log('  大 WAV 走 Web Audio：' + (w0 && w0.time > 1.5 ? '走起来了 t=' + w0.time.toFixed(1) : ' ✗ 没走起来 ' + JSON.stringify(w0)) +
+      '，暂停 ' + (p1.paused && Math.abs(p2.time - p1.time) < 0.05 ? '停住了' : ' ✗ ' + JSON.stringify([p1, p2])) +
+      '，接着放 ' + (!r1.paused && r1.time > p2.time ? 't=' + r1.time.toFixed(1) : ' ✗ ' + JSON.stringify(r1)) +
+      '，右键 ' + r1.time.toFixed(1) + ' → ' + s1.time.toFixed(1) + (s1.time > r1.time + 3 ? '' : ' ✗ 没跳过去'));
+    await page.evaluate(() => Music.test.rejectWav(false));
+  }
   await key(10009); await sleep(400);
   /* 换到有视频的来源放一部：歌要停 */
   await key(37, 4); await key(40, 30);

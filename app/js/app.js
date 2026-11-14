@@ -2073,11 +2073,13 @@
         var bootNote = Boot.info().note || "";
         if (/标坏|选代码时出错/.test(bootNote)) { Diag.incident("更新包启动失败：" + bootNote); }
     } catch (e) {}
-    /* 这次启动的代码是好的：脚本都跑完、之后两秒没有一个 js 错误。boot.js 见到 Boot.ok() 才清掉 booting；没说这句的启动，下次打开
-     * 把它跑的那个更新标坏、改跑安装包。不等连上 Telegram —— 断网时连不上，那不是代码坏了 */
+    /* 这次启动的代码是好的：脚本都跑完、之后两秒没有一个 js 错误。boot.js 见到 Boot.ok() 才清掉 booting；看见了错误就 Boot.fail()，
+     * 下次打开退回安装包；两秒没到就没了的（电视关了、应用被关）什么都没说，boot.js 再给一次。不等连上 Telegram —— 断网时连不上，
+     * 那不是代码坏了。Boot.fail 是 1.2.8 的 boot.js 才有的 */
     setTimeout(function () {
         if (Log.errors()) {
             R("启动后两秒内出过 " + Log.errors() + " 次 js 错误，这次启动不算成功（跑的是更新的话，下次打开退回安装包）");
+            try { if (Boot.fail) { Boot.fail(); } } catch (e) {}
             return;
         }
         try { Boot.ok(); } catch (e) {}

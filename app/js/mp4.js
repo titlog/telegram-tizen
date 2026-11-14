@@ -381,7 +381,14 @@ var Mp4 = (function () {
     }
     function utf8(a) { try { return new TextDecoder("utf-8").decode(a); } catch (e) { return ""; } }
 
-    function parseMoov(b) {
+    /* moov 里有 mvex：分段 MP4，样本表不在 stbl 里，在后面一个个 moof 里 */
+    function isFragmented(b) {
+        var top = header(b, 0, 0);
+        return !!(top && top.type === "moov" && child(b, { p: top.hdr, e: b.length }, "mvex"));
+    }
+
+    /* file：整份文件（分段 MP4 才要）。给了就从 moof 拼样本表，拼出来的和普通 MP4 的一模一样，后面拼段、找关键帧、跳转都不用分 */
+    function parseMoov(b, file) {
         var moov = { p: 8, e: b.length };
         var top = header(b, 0, 0);
         if (!top || top.type !== "moov") { throw new Error("不是 moov"); }
@@ -390,7 +397,9 @@ var Mp4 = (function () {
         var mv = b[mvhd.p];
         var movieTs = u32(b, mvhd.p + (mv ? 20 : 12));
         var movieDur = mv ? u64(b, mvhd.p + 24) : u32(b, mvhd.p + 16);
-        if (child(b, moov, "mvex")) { throw new Error("已经是分段 MP4（fragmented），还不支持"); }
+        var mvex = child(b, moov, "mvex");
+        if (mvex && !file) { throw new Error("已经是分段 MP4（fragmented），还不支持"); }
+        var moofs = mvex ? children(file, 0, file.length).filter(function (x) { return x.type === "moof"; }) : null;
 
         var tracks = [], perKind = {};
         children(b, moov.p, moov.e).forEach(function (trak) {
@@ -412,13 +421,70 @@ var Mp4 = (function () {
                 name: trackName(b, trak, hdlr)
             };
             describeEntry(b, child(b, stbl, "stsd"), tr);
-            sampleTable(b, stbl, tr);
+            if (mvex) { fragTable(file, moofs, tr, trexOf(b, mvex, tr.id)); } else { sampleTable(b, stbl, tr); }
             /* 音频的 edit list 多是编码器预滚（1024/2112 个样本，20–50ms），表达它要负的显示时间，不值得；只认视频的。 */
             tr.shift = tr.kind === "video" ? editShift(b, trak, movieTs, tr.timescale) : 0;
             tr.duration = (tr.end - tr.shift) / tr.timescale;
             tracks.push(tr);
         });
-        return { timescale: movieTs, duration: movieDur / movieTs, tracks: tracks };
+        var dur = movieDur / movieTs;
+        if (mvex && !dur) { tracks.forEach(function (t) { dur = Math.max(dur, t.duration); }); }   // 分段的 mvhd 常写 0
+        return { timescale: movieTs, duration: dur, tracks: tracks, fragmented: mvex ? moofs.length : 0 };
+    }
+
+    /* trex：这条轨在 moof 里没写时用的默认值 */
+    function trexOf(b, mvex, id) {
+        var t = children(b, mvex.p, mvex.e).filter(function (x) { return x.type === "trex" && u32(b, x.p + 4) === id; })[0];
+        return t ? { dur: u32(b, t.p + 12), size: u32(b, t.p + 16), flags: u32(b, t.p + 20) } : { dur: 0, size: 0, flags: 0 };
+    }
+
+    /* 分段 MP4 的样本表：一个个 moof / traf 里的 tfhd（默认值、基准偏移）、tfdt（这一段的起始解码时间）、trun（每个样本的
+     * 时长、大小、标志、合成偏移）。关键帧看 sample_is_non_sync_sample（标志的 0x10000） */
+    function fragTable(f, moofs, tr, def) {
+        var size = [], offset = [], dts = [], cto = [], keys = [], anyCto = false, allKey = true, t = 0, lastDur = 0;
+        moofs.forEach(function (moof) {
+            children(f, moof.p, moof.e).forEach(function (traf) {
+                if (traf.type !== "traf") { return; }
+                var tfhd = child(f, traf, "tfhd");
+                if (!tfhd || u32(f, tfhd.p + 4) !== tr.id) { return; }
+                var hf = u32(f, tfhd.p) & 0xffffff, o = tfhd.p + 8;
+                var base = moof.s, dDur = def.dur, dSize = def.size, dFlags = def.flags;
+                if (hf & 0x1) { base = u64(f, o); o += 8; }
+                if (hf & 0x2) { o += 4; }
+                if (hf & 0x8) { dDur = u32(f, o); o += 4; }
+                if (hf & 0x10) { dSize = u32(f, o); o += 4; }
+                if (hf & 0x20) { dFlags = u32(f, o); o += 4; }
+                var tfdt = child(f, traf, "tfdt");
+                if (tfdt) { t = f[tfdt.p] ? u64(f, tfdt.p + 4) : u32(f, tfdt.p + 4); }
+                var ptr = base;
+                children(f, traf.p, traf.e).forEach(function (trun) {
+                    if (trun.type !== "trun") { return; }
+                    var rf = u32(f, trun.p) & 0xffffff, n = u32(f, trun.p + 4), q = trun.p + 8, first = -1;
+                    if (rf & 0x1) { ptr = base + i32(f, q); q += 4; }
+                    if (rf & 0x4) { first = u32(f, q); q += 4; }
+                    for (var i = 0; i < n; i++) {
+                        var d = dDur, sz = dSize, fl = dFlags, c = 0;
+                        if (rf & 0x100) { d = u32(f, q); q += 4; }
+                        if (rf & 0x200) { sz = u32(f, q); q += 4; }
+                        if (rf & 0x400) { fl = u32(f, q); q += 4; } else if (i === 0 && first >= 0) { fl = first; }
+                        if (rf & 0x800) { c = i32(f, q); q += 4; }
+                        if (c) { anyCto = true; }
+                        if (fl & 0x10000) { allKey = false; } else { keys.push(size.length); }
+                        size.push(sz); offset.push(ptr); dts.push(t); cto.push(c);
+                        ptr += sz; t += d; lastDur = d;
+                    }
+                });
+            });
+        });
+        if (!size.length) { throw new Error("分段 MP4 里找不到这条轨的样本"); }
+        tr.n = size.length;
+        tr.size = new Uint32Array(size);
+        tr.offset = new Float64Array(offset);
+        tr.dts = new Float64Array(dts);
+        tr.cto = anyCto ? new Int32Array(cto) : null;
+        tr.keys = allKey ? null : new Uint32Array(keys);
+        tr.end = t;
+        tr.lastDelta = lastDur;
     }
 
     /* ---------- 查找 ---------- */
@@ -602,7 +668,7 @@ var Mp4 = (function () {
     }
 
     return {
-        scanTop: scanTop, parseMoov: parseMoov, initSegment: initSegment, fragment: fragment, fragmentFrames: fragmentFrames, afterLeading: afterLeading,
+        scanTop: scanTop, parseMoov: parseMoov, isFragmented: isFragmented, initSegment: initSegment, fragment: fragment, fragmentFrames: fragmentFrames, afterLeading: afterLeading,
         sampleAt: sampleAt, keyAtOrBefore: keyAtOrBefore, keyNear: keyNear, pts: pts,
         /* 给 mkv.js 拼 stsd 用的：写盒子的小工具、codecs 字符串 */
         W: W, box: box, full: full, raw: raw, concat: concat, hex2: hex2, avcString: avcString, hevcString: hevcString, fixAvcLevel: fixAvcLevel, fixAvcProfile: fixAvcProfile

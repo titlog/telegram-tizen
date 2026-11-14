@@ -72,6 +72,15 @@ var Boot = (function () {
     }
     function drop() { del(K_BUNDLE); del(K_META); del(K_BOOTING); }
 
+    /* booting 记成「版本#次数」：连着几次启动没走到 Boot.ok()，「!」是那次启动自己看见了失败。光版本号是 1.2.8 以前的 boot.js
+     * 写的，算一次（照 bilibili-tizen 1.5.1） */
+    function bootingOf(s) {
+        var m = /^(.*?)(?:#(\d+|!))?$/.exec(String(s || ""));
+        if (!s || !m) { return { version: "", tries: 0, failed: false }; }
+        return { version: m[1], tries: m[2] === "!" ? 0 : (parseInt(m[2] || "1", 10) || 1), failed: m[2] === "!" };
+    }
+    var tries = 0;   /* 选中的更新包之前连着几次没说 Boot.ok() */
+
     /* 这次启动决定了什么，给 update.js 报 —— 这个文件自己没有日志通道，没人读得到的决定就是
      * 「退回安装包」变成悬案的方式。 */
     var info = { packaged: packagedVersion(), running: "", note: "" };
@@ -96,12 +105,19 @@ var Boot = (function () {
             info.note = meta.version + " 在这台电视上启动失败过，用安装包";
             return null;
         }
-        if (get(K_BOOTING) === meta.version) {
+        /* 一次没走到首页不算数：bilibili 那边 11-07、11-14 两台电视都是同一版正常启动过很多次之后，一次一行日志都没留下的启动
+         * （几秒内就没了，多半是开机时被打断）就把它标坏，退回老安装包直到下一版；这边 11-08 一台巴西的电视也是这样丢了 1.1.5。
+         * 自己看见了失败的照旧下次就退回；什么都没说就没了的再给一次，连着两次才标坏 */
+        var bt = bootingOf(get(K_BOOTING));
+        if (bt.version === meta.version && (bt.failed || bt.tries >= 2)) {
             markBad(meta.version);
             drop();
-            info.note = "上次用 " + meta.version + " 启动没走到首页，标坏，退回安装包 " + info.packaged;
+            info.note = "上次用 " + meta.version + " 启动没走到首页（" +
+                (bt.failed ? "启动时出了错" : "连着 " + bt.tries + " 次") + "），标坏，退回安装包 " + info.packaged;
             return null;
         }
+        tries = bt.version === meta.version ? bt.tries : 0;
+        if (tries) { info.note = "上次用 " + meta.version + " 启动没走到首页就没了（没出错，多半是被打断），再试一次"; }
         var b = parse(get(K_BUNDLE));
         if (!b || b.version !== meta.version || !b.files || !b.scripts || !b.scripts.length) {
             drop();
@@ -156,7 +172,13 @@ var Boot = (function () {
             }
         }
 
-        put(K_BOOTING, b.version);
+        put(K_BOOTING, b.version + "#" + (tries + 1));
+        /* 启动时的 js 错误是这份代码坏，不是被打断：app.js 的错误计数管不到它前面的脚本、也管不到解析不了的 app.js */
+        try {
+            window.addEventListener("error", function () {
+                if (get(K_BOOTING)) { put(K_BOOTING, b.version + "#!"); }
+            });
+        } catch (e) {}
         for (var m = 0; m < urls.length; m++) { tag(urls[m]); }
     }
 
@@ -218,6 +240,8 @@ var Boot = (function () {
         info: function () { return { packaged: info.packaged, running: info.running, note: info.note, mtcute: info.mtcute }; },
         /* 应用起来了：这次启动的代码是好的。 */
         ok: function () { del(K_BOOTING); },
+        /* 这次启动的代码不行（app.js 两秒时看见了 js 错误）：下次直接用安装包 */
+        fail: function () { if (get(K_BOOTING)) { put(K_BOOTING, info.running + "#!"); } },
         /* 更新包的脚本在 onerror 里是 blob: 地址，一串 uuid 说不出是哪个文件；这里换回文件名。 */
         scriptName: function (src) { return names[src] || String(src || "").split("/").pop(); }
     };

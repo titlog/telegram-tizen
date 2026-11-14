@@ -261,6 +261,7 @@
             check("卡片标题去掉站名", Web.title("https://archive.org/details/x", "His Girl Friday : Free Download, Borrow, and Streaming : Internet Archive") === "His Girl Friday");
             await localPlay("g_qt_wave.mov", "QuickTime 写法的声音条目（mp4a 在 wave 里）放起来");
             await localPlay("h_opus_chmismatch.mp4", "Opus 条目的声道数和 dOps 对不上的放起来");
+            await localPlay("l_frag.mp4", "分段 MP4（fragmented）整份读进来放起来");
             await webPlay("Sita_Sings_the_Blues", true);
             await webPlay("TheGeneral1926", false);
             await sintel();
@@ -384,7 +385,25 @@
             window.__app.playMusic(list, 3);
             var said = await until(function () { return /ALAC/.test(txt("mu-state")) ? true : null; }, 15000);
             check("音乐：ALAC 的 m4a 说电视解不了", !!said, "状态「" + txt("mu-state") + "」");
+            /* <audio> 不收的大 WAV（11-13 越南一台 Tizen 6.0，42–52 MB 都是 Format error）改用 Web Audio：让 <audio> 假装不收，
+             * FLAC 那首照样出声、暂停、接着放、快进（music.js 的 pcmPlayer） */
+            Music.test.rejectWav(true);
+            t0 = Date.now();
+            window.__app.playMusic(list, 1);
+            ok = await until(function () { var x = m(); return x.index === 1 && x.time > 1 && !x.paused ? true : null; }, 60000);
+            check("音乐：<audio> 不收的 WAV 改用 Web Audio 放", !!ok, (Date.now() - t0) + "ms，t=" + m().time.toFixed(1) + "，状态「" + txt("mu-state") + "」");
+            if (ok) {
+                key(13); await wait(1000); var p1 = m(); await wait(1000); var p2 = m();
+                key(13); await wait(1500); var r1 = m();
+                check("音乐：Web Audio 暂停、接着放", p1.paused && Math.abs(p2.time - p1.time) < 0.1 && !r1.paused && r1.time > p2.time + 0.5,
+                      [p1.time, p2.time, r1.time].map(function (x) { return x.toFixed(1); }).join(" → "));
+                var b2 = m().time;
+                key(39);
+                var j2 = await until(function () { return m().time > b2 + 8 ? true : null; }, 5000);
+                check("音乐：Web Audio 快进 10 秒", !!j2, b2.toFixed(1) + " → " + m().time.toFixed(1));
+            }
         } finally {
+            Music.test.rejectWav(false);
             window.__app.stopMusic();
             TG.source = orig.source; TG.thumb = orig.thumb;
         }

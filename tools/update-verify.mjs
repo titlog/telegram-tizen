@@ -158,11 +158,14 @@ function launch(store, engine) {
   };
   const c = { document, localStorage: store, JSON, parseInt, Math, Date, String,
     Blob: function () {}, URL: { createObjectURL: () => "blob:" + (++blobs) }, location: { reload: () => { reloaded = true; } } };
+  const listeners = {};
+  c.window = { addEventListener: (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); } };
   Object.assign(c, engine || {});
   vm.createContext(c);
   if (engine && engine.noWasm) { vm.runInContext("WebAssembly = undefined;", c); }
   vm.runInContext(bootSrc + "\nthis.Boot = Boot;", c);
-  return { Boot: c.Boot, written, inserted, styles, linksRemoved: links.removed || 0, reloaded, kids: bodyKids };
+  const fire = (type) => (listeners[type] || []).forEach((fn) => fn({}));
+  return { Boot: c.Boot, written, inserted, styles, linksRemoved: links.removed || 0, reloaded, kids: bodyKids, fire };
 }
 const bundleText = JSON.stringify(bundle);
 const meta = (v, extra) => JSON.stringify(Object.assign({ version: v, shell: boot.shell }, extra));
@@ -188,13 +191,44 @@ ok(r.written.length === bundle.scripts.length && r.written.every((w, i) => PACKA
    "有更新的 9.0.0 → 我们的脚本从 bundle 来（blob:），mtcute、hls.js、sites.local.js 照样从安装包读，顺序不变");
 ok(r.inserted === bundle.files.body && r.kids.every((k) => k.nodeName === "SCRIPT"), "body 的静态 DOM 换成 bundle 的，脚本标签留着");
 ok(r.linksRemoved === 2 && r.styles === bundle.styles.length, "样式换成 bundle 的（blob: 的 <link>，万一加了 CSP 也能跑）");
-ok(s.getItem("tg.update.booting") === "9.0.0", "记下 booting=9.0.0，等首页起来");
+ok(s.getItem("tg.update.booting") === "9.0.0#1", "记下 booting=9.0.0#1，等首页起来");
 ok(r.Boot.info().running === "9.0.0", "running = 9.0.0");
 
-r = launch(s);   /* 上一次没调 Boot.ok() */
-ok(r.written.every((w) => w.indexOf('src="js/') > 0), "上次用 9.0.0 没走到首页 → 这次用安装包");
+/* bilibili 那边 11-07 / 11-14、这边 11-08：一次几秒内就没了、没出错、一行日志都没留下的启动 */
+r = launch(s);   /* 上一次没调 Boot.ok()，也没出错 */
+ok(r.Boot.info().running === "9.0.0" && !r.Boot.isBad("9.0.0") && s.getItem("tg.update.booting") === "9.0.0#2", "上次没走到首页、没出错 → 再试一次，booting=9.0.0#2");
+ok(/再试一次/.test(r.Boot.info().note) && !/标坏/.test(r.Boot.info().note), "note 说再试一次、不说标坏（不算出事）：" + r.Boot.info().note);
+r = launch(s);   /* 连着第二次 */
+ok(r.written.every((w) => w.indexOf('src="js/') > 0), "连着两次没走到首页 → 这次用安装包");
 ok(r.Boot.isBad("9.0.0") && !s.getItem("tg.update.bundle") && !s.getItem("tg.update.booting"), "9.0.0 标坏、更新包删掉");
-ok(/没走到首页/.test(r.Boot.info().note), "说明写在 note 里：" + r.Boot.info().note);
+ok(/没走到首页（连着 2 次）.*标坏/.test(r.Boot.info().note), "说明写在 note 里：" + r.Boot.info().note);
+
+s = storage({ "tg.update.meta": meta("9.0.0"), "tg.update.bundle": bundleText });
+r = launch(s);
+r.fire("error");
+ok(s.getItem("tg.update.booting") === "9.0.0#!", "启动时出了 js 错误 → booting=9.0.0#!");
+r = launch(s);
+ok(r.Boot.info().running === r.Boot.info().packaged && r.Boot.isBad("9.0.0") && /启动时出了错.*标坏/.test(r.Boot.info().note), "启动时出过错 → 下一次就用安装包：" + r.Boot.info().note);
+
+s = storage({ "tg.update.meta": meta("9.0.0"), "tg.update.bundle": bundleText });
+r = launch(s);
+r.Boot.fail();
+ok(s.getItem("tg.update.booting") === "9.0.0#!", "Boot.fail() → booting=9.0.0#!");
+r = launch(s);
+ok(r.Boot.isBad("9.0.0"), "Boot.fail() 之后下一次就用安装包");
+
+s = storage({ "tg.update.meta": meta("9.0.0"), "tg.update.bundle": bundleText });
+r = launch(s);
+r.Boot.ok(); r.fire("error"); r.Boot.fail();
+ok(!s.getItem("tg.update.booting"), "Boot.ok() 之后的错误和 Boot.fail() 不留 booting");
+
+s = storage({ "tg.update.meta": meta("9.0.0"), "tg.update.bundle": bundleText, "tg.update.booting": "9.0.0" });
+r = launch(s);   /* 1.2.8 以前的 boot.js 写的光版本号 */
+ok(r.Boot.info().running === "9.0.0" && s.getItem("tg.update.booting") === "9.0.0#2", "老格式 booting=9.0.0 算一次 → 再试一次");
+
+s = storage({ "tg.update.meta": meta("9.0.0"), "tg.update.bundle": bundleText, "tg.update.booting": "8.0.0#1" });
+r = launch(s);
+ok(r.Boot.info().running === "9.0.0" && s.getItem("tg.update.booting") === "9.0.0#1" && !r.Boot.info().note, "别的版本留下的 booting 不算这一份的");
 
 s = storage({ "tg.update.meta": meta("9.0.0"), "tg.update.bundle": bundleText });
 r = launch(s);
