@@ -4,9 +4,11 @@
  * 带变量的用 {0} {1}：T("从 {0} 接着放", fmtTime(t))。test/i18n.mjs 检查每个 T("…") 和 index.html 里的 data-i18n 在 EN 里都有。
  * 日志（Log.report / R(...)）不翻，那是给开发看的。
  *
- * 选哪个：手动选过的（来源栏最下面那一项，存 tg.lang.v1）→ 电视系统语言是中文就中文、别的都英文。
- * 例外：已经在用的电视（本地有看过的记录、上次的来源）第一次升级到双语版时定成中文 —— 2026-10-18 之前只有中文界面，
- * 用户的电视系统语言不一定是中文，升级之后突然变成英文不对。
+ * 选哪个：手动选过的（来源栏最下面那一项，存 tg.lang.v1）→ 没选过就跟电视的系统语言（zh 开头中文、别的英文），什么都不存。
+ * 1.2.9 以前还有一条「本地有看过的记录、上次的来源，就当是双语之前就在用、定成中文并存下来」：可「跟系统语言」从来不存，
+ * 外国的新用户放过一部片子，第二次打开就被当成老用户、换成了中文（11 月的诊断日志里一再出现「升级前就在用（保持中文），系统语言 en-GB」，
+ * 后面紧跟着观众自己切回英文）。只有中文界面的版本只在 10-18 开源当天那几个小时，第一个发布版 1.0.0 已经是双语，这条拿掉了。
+ * 被它存成 zh 的电视：一次性改正（下面的 MIG），每台电视只做一次。
  *
  *   I18n.lang（"zh" | "en"）、I18n.t(key, ...)、I18n.date(d)、I18n.apply()（换掉 index.html 里 data-i18n 的元素）、I18n.set(lang)
  */
@@ -19,10 +21,19 @@ var I18n = (function () {
 
     var sys = String(navigator.language || (navigator.languages && navigator.languages[0]) || "");
     var lang = get(KEY), why = "手动选的";
-    if (lang !== "zh" && lang !== "en") {
-        if (get("tg.progress.v1") || get("tg.lastSource.v1")) { lang = "zh"; why = "升级前就在用（保持中文）"; put(KEY, lang); }
-        else { lang = /^zh/i.test(sys) ? "zh" : "en"; why = "跟系统语言"; }
+    /* 一次性改正（2026-11-25）：上面那条存下的 zh 和手动选的 zh 分不开。存的是 zh、系统语言又不是中文的，一律改成 en
+     * （真在非中文系统上手动选了中文的，被改回去这一次，来源栏最下面再切一次就好）。做没做过记在 MIG：之后手动选的 zh 一直留着 */
+    var MIG = "tg.lang.fix1";
+    if (!get(MIG)) {
+        put(MIG, "1");
+        if (lang === "zh" && !/^zh/i.test(sys)) {
+            lang = "en";
+            put(KEY, lang);
+            why = "原来存的 zh 一次性改成 en";
+            if (typeof Log !== "undefined") { Log.report("app", "界面语言：系统是 " + (sys || "空") + "，原来存的 zh 改成 en（一次性）"); }
+        }
     }
+    if (lang !== "zh" && lang !== "en") { lang = /^zh/i.test(sys) ? "zh" : "en"; why = "跟系统语言"; }
 
     var EN = {
         /* ---------- index.html ---------- */
@@ -104,6 +115,13 @@ var I18n = (function () {
         "检查网络后按确认重试": "Check the network, then press OK to retry",
         "要重新安装一次": "Reinstall the app once",
         "启动出错": "Something went wrong while starting",
+        "两步验证密码错了太多次": "Too many wrong two-step verification passwords",
+        "Telegram 让等一会儿": "Telegram asks you to wait",
+        "Telegram 暂时不让再试，{0}后再来。": "Telegram won't let you try again for now. Come back in {0}.",
+        "{0} 秒": "{0} seconds",
+        "{0} 分钟": "{0} minutes",
+        "{0} 小时 {1} 分钟": "{0} h {1} min",
+        "{0} 小时": "{0} hours",
         "按确认重试，按返回键退出": "Press OK to retry, or Back to exit",
         "反复出现的话，用手机扫这个码到 GitHub 留个 issue，开发者会尽快想办法解决。": "If this keeps happening, scan this with your phone to open an issue on GitHub — the developer will look into it as soon as possible.",
         "反复出现的话，到 GitHub 留个 issue，开发者会尽快想办法解决：": "If this keeps happening, open an issue on GitHub — the developer will look into it as soon as possible:",
@@ -224,6 +242,9 @@ var I18n = (function () {
         "mdat 一直到文件尾，没有 moov": "No moov: the media data runs to the end of the file",
         "已经是分段 MP4（fragmented），还不支持": "Fragmented MP4 isn't supported yet",
         "不认识的文件格式（不是 MP4 也不是 MKV）": "Unknown file format (neither MP4 nor MKV)",
+        "这个文件其实是 MPEG-TS 格式（不是真的 MP4），这个应用放不了这种格式": "This file is actually MPEG-TS (not a real MP4), a format this app can't play",
+        "下载停了：{0} 秒一个字节都没收到，重连过也一样。检查一下网络，退出来再放一次":
+            "The download stopped: nothing arrived for {0} seconds, even after reconnecting. Check the network, then go back and play it again",
         "读到文件尾也没找到 moov": "No moov found before the end of the file",
         "不是 MKV（没有 EBML 头）": "Not an MKV (no EBML header)",
         "MKV 里没有 Segment": "No Segment in the MKV",
@@ -292,6 +313,11 @@ var I18n = (function () {
         "正在下载 {0} / {1}": "Downloading {0} / {1}",
         "正在下载…": "Downloading…",
         "正在解码 FLAC…": "Decoding FLAC…",
+        "正在解码…": "Decoding…",
+        "这台电视放不了这首 {0}；改用软件解码只能放 {1} 分钟以内的，这首 {2} 分钟":
+            "This TV can't play this {0} track, and decoding it in software only works for tracks up to {1} minutes; this one is {2} minutes",
+        "这台电视也没有 Web Audio": "and this TV has no Web Audio either",
+        "Web Audio 也放不了：{0}": "Web Audio couldn't play it either: {0}",
         "，3 秒后放下一首": " — playing the next one in 3 seconds",
         "这一串放完了": "That's the end of the list",
         "音乐放完了": "Music finished",

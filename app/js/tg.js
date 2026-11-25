@@ -507,14 +507,38 @@ var TG = (function () {
                 /* 连接作废：先重连，再抛出去让播放器重试（重试时用的是新的 client） */
                 if (remake && gone(e) && !leaving) { await reconnect(); throw e; }      // 页面正在卸载（换账号、重新加载）就不重连了
                 if (/FILE_REFERENCE|File ref/i.test(String(e && (e.message || e.text)))) {
-                    var ms = await again(function () { return client.getMessages(item.msg.chat.id, [item.msg.id]); });
-                    if (ms && ms[0] && ms[0].media) { item.msg = ms[0]; item.doc = ms[0].media; }
+                    /* 新的引用到手了就标上：播放器第一次马上重试，不等 2 秒（player.js 的 startStream） */
+                    if (await refetch()) { try { e.freshRef = true; } catch (e2) {} }
                 }
                 throw e;
             }
         }
+        /* 重新取这条消息：新的文件引用（和文件在哪个 DC）。消息没了返回 false */
+        async function refetch() {
+            var ms = await again(function () { return client.getMessages(item.msg.chat.id, [item.msg.id]); });
+            if (!ms || !ms[0] || !ms[0].media) { return false; }
+            item.msg = ms[0];
+            item.doc = ms[0].media;
+            return true;
+        }
         return {
             size: size,
+            /* 文件在哪个 DC、主连接在哪个 DC（播放器下载停了的时候记一行） */
+            dcs: function () {
+                var f = item.doc && item.doc.dcId;
+                return Promise.resolve().then(function () { return client.getPrimaryDcId(); }).then(function (p) {
+                    return "：文件在 DC" + (f || "?") + "，主连接在 DC" + p + (f && f !== p ? "（下载走另一组连接）" : "");
+                });
+            },
+            /* 下载停了、重开也没字节（player.js 的 stalled）：1 重新取这条消息；2 重建到存这个文件的 DC 的那组连接（mtcute 的 recreateDc：
+             * 那个 DC 的主连接、下载连接一起拆了重连，config 先刷新一次；文件就在主 DC 上的话主连接也跟着重来）。回一句做了什么 */
+            recover: async function (level) {
+                if (level === 1) { return (await refetch()) ? "取到了，文件在 DC" + (item.doc.dcId || "?") : "没取到（消息删了？）"; }
+                var dc = item.doc && item.doc.dcId;
+                if (!dc) { return "不知道文件在哪个 DC，没动"; }
+                await again(function () { return client.recreateDc(dc); });
+                return "DC" + dc + " 重建好了";
+            },
             stream: function (offset, signal, throttle) {
                 var start = Math.floor(offset / CH) * CH;
                 return {

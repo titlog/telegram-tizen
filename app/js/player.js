@@ -121,6 +121,12 @@ var Player = (function () {
                 }
             };
         }
+        /* MPEG-TS：每 188 字节一包、包头是 0x47；M2TS（蓝光）每包前面多 4 字节时间戳，192 字节一包。回包长，不是 TS 回 0 */
+        function tsPacket(a) {
+            if (a.length > 188 * 2 && a[0] === 0x47 && a[188] === 0x47 && a[376] === 0x47) { return 188; }
+            if (a.length > 4 + 192 && a[4] === 0x47 && a[196] === 0x47) { return 192; }
+            return 0;
+        }
         function hexHead(a) { var s = ""; for (var i = 0; i < a.length; i++) { s += (a[i] < 16 ? "0" : "") + a[i].toString(16) + (i % 4 === 3 ? " " : ""); } return s.trim(); }
         /* known：出错的原因是知道的（电视的限制），屏幕上说清楚就好，不当出事上传 */
         function state(phase, msg, known) {
@@ -177,7 +183,11 @@ var Player = (function () {
             }
             try {
                 if (op.remove) { T.sb.remove(op.remove[0], op.remove[1]); T.removing = op; }
-                else { T.cur = op.init ? "init 段" : "t=" + (op.t !== undefined ? op.t.toFixed(1) : "?") + " 那段"; T.sb.appendBuffer(op.buf); T.full = false; if (op.t !== undefined) { T.lastT = op.t; } }
+                else {
+                    T.cur = op.init ? "init 段 " + op.buf.length + " 字节" : "t=" + (op.t !== undefined ? op.t.toFixed(1) : "?") + " 那段";
+                    if (op.init) { T.initLen = op.buf.length; }
+                    T.sb.appendBuffer(op.buf); T.full = false; if (op.t !== undefined) { T.lastT = op.t; }
+                }
                 T.q.shift();
                 if (op.buf) { T.qBytes -= op.buf.length; }
             } catch (e) {
@@ -208,7 +218,9 @@ var Player = (function () {
             S.dead = true;
             var e = video.error;
             var msg = tx("播放器出错") + " code=" + (e ? e.code : "?") + " " + (e && e.message ? e.message : "") + " @" + video.currentTime.toFixed(2);
-            R(msg);
+            /* 出画面之前的「stream parsing failed. Data size=N」：N 是哪条轨的 init 段，对着这里的字节数看（11-14 一台 Tizen 5.5，Data size=695，
+             * 视频条目里有 QuickTime 的 fiel、chrm） */
+            R(msg + (S.firstFrameMs ? "" : "（init 段：" + S.tracks.map(function (T) { return T.tr.kind + " " + (T.initLen || "没进") + (T.initLen ? " 字节" : ""); }).join("，") + "）"));
             S.lanes.forEach(stopLane);
             S.tracks.forEach(function (T) { T.q.length = 0; });
             var tall = e && e.code === 3 && !S.firstFrameMs && !tallOk() ? tallVideo(S) : null;
@@ -226,10 +238,14 @@ var Player = (function () {
             state("error", msg);
         }
 
+        /* SourceBuffer 的 buffered：媒体元素出错之后 MediaSource 被关、SourceBuffer 被摘掉，再读就抛 InvalidStateError（11-15、11-24 两台电视，
+         * 抛在计时器里成了一次「js 错误」出事上传）。读不到当 null */
+        function sbBuffered(T) { try { return T.sb ? T.sb.buffered : null; } catch (e) { return null; } }
+
         function evict(behind) {
             var t = video.currentTime - behind;
-            S && S.tracks.forEach(function (T) {
-                var b = T.sb && T.sb.buffered;
+            S && !S.dead && S.tracks.forEach(function (T) {
+                var b = sbBuffered(T);
                 if (b && b.length && b.start(0) < t - 1 && !(T.q[0] && T.q[0].remove)) { T.q.unshift({ remove: [0, t] }); pumpSb(T); }
             });
         }
@@ -431,7 +447,7 @@ var Player = (function () {
             if (lane.ac) { lane.ac.abort(); }
             var ac = lane.ac = new AbortController();
             (async function () {
-                var tries = 0;
+                var tries = 0, quickUsed = false;
                 while (S === sess && lane.gen === g) {
                     var st = sess.source.stream(offset, ac.signal, function () { return gate(sess, lane, g); });
                     /* 重试时从窗口末尾接着读，窗口里还没用掉的字节留着（对得上才留：起点按 512KB 对齐） */
@@ -440,7 +456,11 @@ var Player = (function () {
                     try {
                         for await (var c of st.iter) {
                             if (S !== sess || lane.gen !== g) { return; }
-                            if (first) { first = false; sess.firstChunkMs = sess.firstChunkMs || Math.round(performance.now() - t0); tries = 0; }
+                            if (first) {
+                                first = false; sess.firstChunkMs = sess.firstChunkMs || Math.round(performance.now() - t0); tries = 0; quickUsed = false;
+                                /* 连着几次重开都没字节（stalled）之后，字节又来了：是哪一步之后来的，下一份日志靠这行分 */
+                                if (sess.zeroN) { R("字节又来了：连着 " + sess.zeroN + " 次重开没字节，最后一步是" + (sess.lastStep || "重开") + "，之后 " + Math.round(performance.now() - sess.reopenAt) + "ms"); sess.zeroN = 0; }
+                            }
                             sess.bytes += c.length;
                             sess.lastByteAt = performance.now();
                             lane.win.add(c);
@@ -451,9 +471,13 @@ var Player = (function () {
                     } catch (e) {
                         if (ac.signal.aborted || S !== sess || lane.gen !== g) { return; }
                         tries++;
-                        R("下载出错（" + lane.name + "，第 " + tries + " 次）" + errStr(e) + "，" + Math.min(10, tries * 2) + " 秒后从 " + mb(lane.win.endOff) + " 接着取");
+                        /* 文件引用过期（FILE_REFERENCE_EXPIRED）、数据源已经拿到了新的（e.freshRef，tg.js）：马上接着取，不用等 2 秒
+                         * —— 11 月的日志里差不多每次开播第一个请求都是它。连着两次都是它就照常等（新引用也不管用，别空转） */
+                        var quick = !!(e && e.freshRef) && !quickUsed;
+                        quickUsed = quick;
+                        R("下载出错（" + lane.name + "，第 " + tries + " 次）" + errStr(e) + "，" + (quick ? "拿到了新的文件引用，马上" : Math.min(10, tries * 2) + " 秒后") + "从 " + mb(lane.win.endOff) + " 接着取");
                         offset = lane.win.endOff;
-                        await sleep(Math.min(10, tries * 2) * 1000);
+                        if (!quick) { await sleep(Math.min(10, tries * 2) * 1000); }
                     }
                 }
             })();
@@ -497,6 +521,14 @@ var Player = (function () {
                         if (h.type === "moof") { reject(knownErr(tx("分段 MP4 的 moov 不在开头，还不支持"))); return false; }
                         /* 开头就不像盒子（AVI 的 RIFF、TS 的 0x47…）：别顺着乱七八糟的「大小」一路跳到文件尾 */
                         if (pos === 0 && (h.size < 8 || h.size > sess.source.size || !/^[\x20-\x7e]{4}$/.test(h.type))) {
+                            /* MPEG-TS（标着 video/mp4、.mp4 发上来的，11-16…25 五份上传，357 MB–1.5 GB，开头都是 47401110…）：说清楚、不当出事。
+                             * 要放得把 TS 转成 fMP4（hls.js 里有转封装，可它要的是 HLS 的分段和时长表，这种几百 MB 的整个文件没有），没做 */
+                            var ts = tsPacket(win.read(0, Math.min(400, win.endOff)));
+                            if (ts) {
+                                R("MPEG-TS（" + ts + " 字节一包）不是 MP4，开头 16 字节 " + hexHead(win.read(0, Math.min(16, win.endOff))) + "：说清楚，不当出事");
+                                reject(knownErr(tx("这个文件其实是 MPEG-TS 格式（不是真的 MP4），这个应用放不了这种格式")));
+                                return false;
+                            }
                             /* 11-04…13 六份上传只有这一句，是 AVI、TS 还是别的看不出来：把文件开头记下来（魔数，不是内容） */
                             R("不认识的文件格式，开头 16 字节 " + hexHead(win.read(0, Math.min(16, win.endOff))));
                             reject(new Error(tx("不认识的文件格式（不是 MP4 也不是 MKV）")));
@@ -812,12 +844,62 @@ var Player = (function () {
             R(why + " → " + c.t.toFixed(1) + "s" + (exact > c.t ? "（停在 " + exact.toFixed(1) + "s）" : "") + "，从 " + mb(c.pos) + " 读" + (c.resync ? "（没有 Cues，按码率猜的）" : ""));
         }
 
+        /* ---------- 下载停了：重开、升级、放弃 ----------
+         * 以前卡住 20 秒、字节也停了就从当前位置重开，一直重开：11-24 一台 Tizen 10 上重开了 33 次、每次一个字节都没来（主连接照样答话，
+         * 来源列表刷得出来），最后「90 秒没出画面」。重开 = 同一个数据源再要一遍，到存这个文件的 DC 的那组连接要是卡死了，要多少遍都一样。
+         * 现在「上次重开之后一个字节都没来」连着算次数，一次比一次重：
+         *   0 照旧重开 → 1 数据源 recover(1)：重新取这条消息（新的文件引用）→ 2 recover(2)：重建到存这个文件的 DC 的连接 → 3 再重开一次
+         *   → 4 不试了，说清楚（算出事：原因还不知道）。哪一步之后字节回来了，startStream 记一行「字节又来了」。
+         * 第一次还记一行文件在哪个 DC、主连接在哪个 DC（数据源的 dcs()）：分得开「只有另一个 DC 的下载卡死」和别的。
+         * HTTP 的数据源没有 recover，只重开。返回 false = 放弃了 */
+        var STEP = ["重开", "重新取这条消息（新的文件引用）", "重建到存这个文件的 DC 的连接"];
+        function noteDc(sess) {
+            if (sess.dcNoted || !sess.source.dcs) { return; }
+            sess.dcNoted = true;
+            sess.source.dcs().then(function (d) { R("这部片子" + d); }, function (e) { R("问不到文件在哪个 DC：" + errStr(e)); });
+        }
+        function stalled(sess, t, why) {
+            var now = performance.now();
+            sess.zeroN = sess.reopenAt && sess.lastByteAt <= sess.reopenAt ? (sess.zeroN || 0) + 1 : 0;
+            noteDc(sess);
+            if (sess.zeroN >= 4) {
+                var secs = Math.round((now - sess.lastByteAt) / 1000);
+                R(why + "：连着 " + sess.zeroN + " 次重开一个字节都没来（最后一个字节 " + secs + " 秒前，最后一步是" + (sess.lastStep || "重开") + "），不再试了");
+                sess.dead = true;
+                sess.lanes.forEach(stopLane);
+                state("error", tx("下载停了：{0} 秒一个字节都没收到，重连过也一样。检查一下网络，退出来再放一次", secs));
+                return false;
+            }
+            var step = sess.zeroN === 1 || sess.zeroN === 2 ? sess.zeroN : 0;
+            if (step && !sess.source.recover) { step = 0; }
+            R(why + "，从 " + t.toFixed(1) + "s 重开" + (sess.zeroN ? "（上次重开之后一个字节都没来，连着第 " + sess.zeroN + " 次" + (step ? "；先" + STEP[step] : "") + "）" : ""));
+            sess.reopenAt = now;
+            sess.lastStep = STEP[step];
+            if (!step) { restartAt(sess, t, "重开"); return true; }
+            var t0 = now;
+            new Promise(function (ok, no) {
+                setTimeout(function () { no(new Error("15 秒没回")); }, 15000);
+                sess.source.recover(step).then(ok, no);
+            }).then(function (what) {
+                R(STEP[step] + "：" + what + "，" + Math.round(performance.now() - t0) + "ms");
+            }, function (e) {
+                R(STEP[step] + "没成（" + Math.round(performance.now() - t0) + "ms）：" + errStr(e));
+            }).then(function () {
+                if (S !== sess || sess.dead) { return; }       // 等的时候观众走了、或者 90 秒到了已经放弃
+                sess.reopenAt = performance.now();
+                restartAt(sess, t, "重开");
+            });
+            return true;
+        }
+
         /* 90 秒从头（moov / MKV 头）到手算起，不从按下播放算：11-04 一台 Tizen 5.5 的 MKV 头下了 219 秒，一到手就判「90 秒没出画面」、
          * 一个媒体字节都没给机会；11-10 另一台文件尾的 moov 下了 77 秒，只剩 13 秒 */
         function watchFirstFrame(sess, resolve, reject) {
             var started = false, since = performance.now();
             var tick = setInterval(function () {
-                if (S !== sess) { clearInterval(tick); return; }
+                /* 停下了的这部（fatal：播放器出错、已经说清楚了）：不再数 90 秒。以前只看 S !== sess，出错之后观众没离开，90 秒到了照样
+                 * 去读已经摘掉的 SourceBuffer，抛一个 js 错误，把一次说清楚了的失败变成出事上传（11-15 一台 Tizen 9，High 10 的 H.264） */
+                if (S !== sess || sess.dead) { clearInterval(tick); return; }
                 if (!started && video.readyState >= 2) {
                     started = true;
                     video.play().catch(function (e) { R("play() " + errStr(e)); });
@@ -856,14 +938,23 @@ var Player = (function () {
                         }, 4000);
                     }
                 }
+                /* 出画面之前字节停了 20 秒（11-24 那台 Tizen 10 两次「收了 0.0MB」；挂起醒来之后放）：和播放中一样重开、升级。
+                 * 前方已经攒够了的不算（那是在等解码器，不是下不来） */
+                var nowP = performance.now();
+                if (sess.moovDone && nowP - sess.lastByteAt > 20000 && nowP - (sess.reopenAt || since) > 20000 && frontier() - refTime() < 30) {
+                    if (!stalled(sess, sess.seekAt ? sess.seekAt.to : video.currentTime, "出画面之前 20 秒一个字节都没来")) { clearInterval(tick); reject(new Error("stalled")); return; }
+                }
                 if (performance.now() - since > 90000) {
                     clearInterval(tick);
-                    /* 放弃了就别再取：2026-10-23 放弃之后下载还在每 10 秒重试一次，直到观众离开这个视频。 */
+                    /* 放弃了就别再取：2026-10-23 放弃之后下载还在每 10 秒重试一次，直到观众离开这个视频。
+                     * dead：stalled 正等着的那一步（recover）回来了也不再重开 */
+                    sess.dead = true;
                     sess.lanes.forEach(stopLane);
                     /* 放弃时把现场都写下来：电视上没有调试器，下一次只能靠这一行（2026-10-26 印度那台的日志里只有一句「放弃」） */
                     R("90 秒没出画面，放弃：readyState " + video.readyState + "，" + (video.paused ? "暂停" : "在放") + "，t=" + video.currentTime.toFixed(3) +
                       "，各轨 " + api.debug() + "，收了 " + mb(sess.bytes) + "，最后一个字节 " + Math.round((performance.now() - (sess.lastByteAt || sess.t0)) / 1000) + " 秒前，" +
                       "队列 " + sess.tracks.map(function (T) { return T.tr.kind + " " + T.q.length + " 段"; }).join(" / ") + (sess.fmt === "mkv" ? "，起点 " + sess.startTo : ""));
+                    noteDc(sess);
                     state("error", tx("90 秒没出画面"));
                     reject(new Error("timeout"));
                 }
@@ -927,7 +1018,7 @@ var Player = (function () {
         function monitor(sess) {
             var lastT = -1, stuckAt = 0, stalls = 0, lastLine = performance.now(), lastBytes = sess.bytes, lastEvict = 0;
             sess.mon = setInterval(function () {
-                if (S !== sess) { clearInterval(sess.mon); return; }
+                if (S !== sess || sess.dead) { clearInterval(sess.mon); return; }
                 var t = video.currentTime, now = performance.now();
                 /* 播放头要落在目标之后 5 秒内才算：清旧缓冲那几十毫秒里 currentTime 还停在原处（往回跳时它比目标大） */
                 if (sess.seekAt && !video.paused && t > sess.seekAt.to + 0.04 && t < sess.seekAt.to + 5) {
@@ -959,11 +1050,18 @@ var Player = (function () {
                             R("结尾停在 " + t.toFixed(2) + "（时长 " + sess.duration.toFixed(2) + "，各轨 " + api.debug() + "），当放完了");
                             state("ended");
                         }
-                        /* 卡住 20 秒、这段时间一个字节都没来 → 从当前位置重开读取 */
+                        /* 卡住 20 秒、这段时间一个字节都没来 → 从当前位置重开读取。前方已经拼好了很多的（字节停着是因为够了 —— 暂停了好几分钟
+                         * 再接着放，Tizen 5.5 上画面不走、等到这里重开才好，原因还没分清）只重开、不算「下不来」；真没字节的走 stalled 升级 */
                         if (now - stuckAt > 20000 && now - sess.lastByteAt > 20000) {
-                            R("卡了 20 秒、字节也停了，从 " + t.toFixed(1) + "s 重开");
                             stuckAt = now;
-                            restartAt(sess, t, "重开");
+                            var ahead = frontier() - t;
+                            if (ahead > 30) {
+                                R("卡了 20 秒，前方还有 " + ahead.toFixed(0) + " 秒拼好了的（字节停着是因为够了），从 " + t.toFixed(1) + "s 重开：readyState " + video.readyState +
+                                  "，各轨 " + api.debug() + (sess.resumedAt ? "，" + Math.round((now - sess.resumedAt) / 1000) + " 秒前按的接着放" : ""));
+                                sess.zeroN = 0;
+                                sess.reopenAt = now;
+                                restartAt(sess, t, "重开");
+                            } else if (!stalled(sess, t, "卡了 20 秒、字节也停了")) { clearInterval(sess.mon); return; }
                         }
                     } else if (stuckAt) {
                         var d = now - stuckAt;
@@ -1000,8 +1098,28 @@ var Player = (function () {
             try { video.load(); } catch (e) {}
             if (sess.url) { URL.revokeObjectURL(sess.url); }
         };
-        /* play() 被随后的 pause() 打断会抛一个没人接的 Promise 异常（电视日志里出现过），吞掉 */
-        api.toggle = function () { if (video.paused) { video.play().catch(function () {}); } else { video.pause(); } return !video.paused; };
+        /* play() 被随后的 pause() 打断会抛一个没人接的 Promise 异常（电视日志里出现过），吞掉。
+         * 接着放的时候记一行：Tizen 5.5 上暂停几分钟再接着放，画面停着、20 秒后监视重开才好（11-21 一台，三次；推测，没证实）。
+         * 按下那一刻和 2 秒后的播放头、readyState、各轨缓冲：分得开「数据在、解码器不走」和「缓冲被清掉了」。暂停 5 秒以内又走了的不记 */
+        api.toggle = function () {
+            var sess = S;
+            if (!video.paused) { video.pause(); return false; }
+            video.play().catch(function () {});
+            if (sess && sess.ready && !sess.dead) {
+                var at = performance.now(), t1 = video.currentTime, rs = video.readyState, held = sess.pausedAt ? Math.round((at - sess.pausedAt) / 1000) : -1, b1 = api.debug();
+                sess.resumedAt = at;
+                setTimeout(function () {
+                    if (S !== sess || sess.dead || sess.resumedAt !== at) { return; }
+                    var t2 = video.currentTime, moved = t2 - t1;
+                    if (held >= 0 && held < 5 && moved > 0.5) { return; }
+                    R("接着放（暂停了 " + (held >= 0 ? held + " 秒" : "?") + "）：按下时 t=" + t1.toFixed(2) + " readyState " + rs + "，各轨 " + b1 +
+                      "；2 秒后 t=" + t2.toFixed(2) + (moved < 0.5 ? "（没走）" : "") + " readyState " + video.readyState + (video.paused ? " 暂停着" : "") + "，各轨 " + api.debug() +
+                      "，前方 " + (frontier() - t2).toFixed(0) + "s，最后一个字节 " + Math.round((performance.now() - sess.lastByteAt) / 1000) + " 秒前");
+                }, 2000);
+            }
+            return !video.paused;
+        };
+        video.addEventListener("pause", function () { if (S) { S.pausedAt = performance.now(); } });
         api.paused = function () { return video.paused; };
         api.time = function () { return video.currentTime; };
         api.duration = function () { return S && S.ready ? S.duration : 0; };
@@ -1025,7 +1143,8 @@ var Player = (function () {
         /* 每个 SourceBuffer 的缓冲区间（音视频分开看，video.buffered 是交集） */
         api.debug = function () {
             return S ? S.tracks.map(function (T) {
-                var b = T.sb.buffered, s = [];
+                var b = sbBuffered(T), s = [];
+                if (!b) { return T.tr.kind + "[摘掉了]"; }
                 for (var i = 0; i < b.length; i++) { s.push(b.start(i).toFixed(3) + "-" + b.end(i).toFixed(3)); }
                 return T.tr.kind + "[" + s.join(" ") + "]";
             }).join(" ") : "";

@@ -51,11 +51,12 @@
     /* ---------- 启动 ---------- */
 
     /* 启动走不下去：借扫码登录的面板写原因。右边二维码那块没有码就是一块白（「连不上 Telegram」以前也是这样），藏起来 */
-    function bootFail(title, body) {
+    /* known：原因清楚、不是毛病（比如 Telegram 让等），不放留 issue 的码 */
+    function bootFail(title, body, known) {
         $("home").classList.add("hide");
         $("panel").classList.add("on");
         $("qr").style.display = "none";
-        $("how").innerHTML = "<div style='font-size:48px'>" + title + "</div><div style='font-size:30px;color:#999;margin-top:20px'>" + body + "</div>" + reportHtml(300);
+        $("how").innerHTML = "<div style='font-size:48px'>" + title + "</div><div style='font-size:30px;color:#999;margin-top:20px'>" + body + "</div>" + (known ? "" : reportHtml(300));
         S.screen = "bootfail";
     }
 
@@ -268,20 +269,27 @@
         /* 只有一个账号、它原来登录着（会话在别处被结束了）：也说一句，不然观众只看到扫码页、不知道为什么 */
         $("qrnote").textContent = !others ? (a.userId ? T("{0} 的登录失效了，重新扫码就好", a.name) : "") :
             !a.userId ? T("添加账号：用另一个 Telegram 账号扫码 · 按返回键取消") : T("{0} 要重新扫码登录 · 按返回键换别的账号", a.name);
-        var n = 0;
-        await TG.login(function (url) {
-            n++;
-            /* Tizen 5.0（老的那份 mtcute）上从启动到能登录要两分半（2026-10-28）：第一张码出在哪一刻 */
-            if (n === 1) { R("扫码：第一张码，从进程启动 " + Math.round(performance.now()) + "ms"); }
-            $("qr").innerHTML = TGLib.qrSvg(url, 10);
-            $("qrstate").textContent = T("二维码 30 秒换一张（第 {0} 张）", n);
-        }, function () {
-            R("扫码：手机上确认了（第 " + n + " 张码）");
-            $("qrstate").textContent = T("已扫码，正在登录…");
-        }, function () {
-            R("扫码：要两步验证密码");
-            return askPassword().then(function (pw) { R("扫码：交了两步验证密码"); return pw; });
-        }, function () { R("扫码：两步验证密码不对"); toast(T("两步验证密码不对，再输一次")); });
+        var n = 0, pw = 0;
+        try {
+            await TG.login(function (url) {
+                n++;
+                /* Tizen 5.0（老的那份 mtcute）上从启动到能登录要两分半（2026-10-28）：第一张码出在哪一刻 */
+                if (n === 1) { R("扫码：第一张码，从进程启动 " + Math.round(performance.now()) + "ms"); }
+                $("qr").innerHTML = TGLib.qrSvg(url, 10);
+                $("qrstate").textContent = T("二维码 30 秒换一张（第 {0} 张）", n);
+            }, function () {
+                R("扫码：手机上确认了（第 " + n + " 张码）");
+                $("qrstate").textContent = T("已扫码，正在登录…");
+            }, function () {
+                R("扫码：要两步验证密码");
+                return askPassword().then(function (p) { pw++; R("扫码：交了两步验证密码"); return p; });
+            }, function () { R("扫码：两步验证密码不对"); toast(T("两步验证密码不对，再输一次")); });
+        } catch (e) {
+            /* 两步验证密码错了好几次，Telegram 让等（11-22 一台电视错了六次：FLOOD_WAIT_3536，屏幕上是「启动出错」和原话，还当出事传了）。
+             * 标上，boot 的 catch 照直说要等多久、不当出事 */
+            if (pw && TG.floodWait(e)) { e.pwWait = TG.floodWait(e); }
+            throw e;
+        }
         R("扫码登录成功（出了 " + n + " 张码）");
         $("panel").classList.remove("on");
     }
@@ -1623,7 +1631,8 @@
         var st = $("mu-state"), l = music.list();
         st.classList.toggle("err", phase === "error");
         if (phase === "loading") {
-            st.textContent = info.stage === "decode" ? T("正在解码 FLAC…") : info.total ? T("正在下载 {0} / {1}", fmtMB(info.got), fmtMB(info.total)) : T("正在下载…");
+            st.textContent = info.stage === "decode" ? T("正在解码 FLAC…") : info.stage === "webaudio" ? T("正在解码…") :
+                info.total ? T("正在下载 {0} / {1}", fmtMB(info.got), fmtMB(info.total)) : T("正在下载…");
         }
         else if (phase === "playing") { st.textContent = ""; }
         else if (phase === "paused") { st.textContent = T("已暂停"); }
@@ -2056,10 +2065,27 @@
                      music: function () { return { item: S.mu.item, index: music.index(), count: music.list().length, time: music.time(), paused: music.paused() }; },
                      playMusic: function (list, i) { playMusic(list[i], list); }, stopMusic: function () { stopMusic("自测"); } };
 
+    /* 要等多久，说给人听：59 分钟、2 小时 5 分钟 */
+    function waitText(sec) {
+        if (sec < 60) { return T("{0} 秒", sec); }
+        var m = Math.ceil(sec / 60);
+        return m < 60 ? T("{0} 分钟", m) : m % 60 ? T("{0} 小时 {1} 分钟", Math.floor(m / 60), m % 60) : T("{0} 小时", m / 60);
+    }
     boot().catch(function (e) {
         /* 扫码页按返回、换账号都是 reload：卸载时 mtcute 销毁 port，等着的 signInQr 跟着断。那不是出事，以前每次都记成「启动出错」、报一次出事 */
         if (TG.leaving()) { return; }
         R("启动出错 " + errStr(e) + " | " + String(e && e.stack || "").split("\n").slice(0, 3).join(" "));
+        /* Telegram 让等（FLOOD_WAIT）：说要等多久。两步验证密码错多了的那种是 Telegram 的规矩、不当出事；别处来的照旧上传（可能是我们请求太多） */
+        var wait = e && (e.pwWait || TG.floodWait(e));
+        if (wait) {
+            if (e.pwWait) { R("两步验证密码错了太多次，Telegram 让等 " + wait + " 秒：屏幕上说要等多久，不当出事"); }
+            else { Diag.incident("启动出错：" + errStr(e)); }
+            if (S.screen !== "home") {
+                bootFail(e.pwWait ? T("两步验证密码错了太多次") : T("Telegram 让等一会儿"),
+                         T("Telegram 暂时不让再试，{0}后再来。", waitText(wait)) + "<br>" + T("按确认重试，按返回键退出"), !!e.pwWait);
+            }
+            return;
+        }
         Diag.incident("启动出错：" + errStr(e));
         /* 以前屏幕上什么都不变：扫码页上码不再换、或者停在空白的主页，观众只能干等。到了主页之后的错各处自己管（来源、播放器） */
         if (S.screen !== "home") { bootFail(T("启动出错"), esc(errStr(e)) + "<br>" + T("按确认重试，按返回键退出")); }

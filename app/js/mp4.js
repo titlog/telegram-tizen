@@ -224,6 +224,25 @@ var Mp4 = (function () {
                 if (iso) { tr.stsd = iso.stsd; tr.stsdNote += "，改写成 ISO 的样子（" + iso.why + "）"; }
             } catch (e) { tr.stsdNote += "，改写不了：" + e.message; }
         }
+        if (tr.kind === "video" && !tr.unsupported) {
+            try {
+                var isv = isoVideo(b, entry);
+                if (isv) { tr.stsd = isv.stsd; tr.stsdNote += "，去掉了 QuickTime 才有的 " + isv.why; }
+            } catch (e) { tr.stsdNote += "，改写不了：" + e.message; }
+        }
+    }
+
+    /* 视频条目里 QuickTime 才有的盒子（fiel：场序，chrm：色度位置）不进 init 段。11-14 一台 Tizen 5.5：avc1[avcC,fiel,chrm,pasp] 的片子
+     * init 段（695 字节，对得上视频那条）一进去就「stream parsing failed」，声音条目已经改成 ISO 写法了。ISO 里没有这两个盒子，
+     * 解码用不着（桌面 Chrome 的解析器本来就跳过不认识的）；是不是它们让电视的解析器出错还没证实（中等把握）：去掉了还出错的话，
+     * 那行 SourceBuffer error 里写着 init 段多少字节、去掉了什么。别的子盒子（avcC / hvcC、pasp、colr、btrt…）原样留着 */
+    var QT_VIDEO_ONLY = /^(fiel|chrm)$/;
+    function isoVideo(b, entry) {
+        var kids = children(b, entry.p + 78, entry.e), drop = kids.filter(function (k) { return QT_VIDEO_ONLY.test(k.type); });
+        if (!drop.length) { return null; }
+        var keep = kids.filter(function (k) { return !QT_VIDEO_ONLY.test(k.type); }).map(function (k) { return b.subarray(k.s, k.e); });
+        var ent = box(entry.type, b.subarray(entry.p, entry.p + 78), concat(keep));
+        return { stsd: full("stsd", 0, 0, concat([raw(function (w) { w.u32(1); }, 4), ent])), why: drop.map(function (k) { return k.type; }).join("、") };
     }
 
     /* 声音条目写成 ISO 的样子再进 init 段。电视的 MP4 解析器只认 ISO 那一种：

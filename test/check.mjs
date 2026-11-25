@@ -25,6 +25,12 @@ function packets(file, sel) {
 
 let bad = 0;
 const fail = (m) => { bad++; console.log('  ✗ ' + m); };
+/* init 段里第一个样本条目的子盒子（stsd 正文：4 字节版本 + 4 字节条数，条目头 8 字节，视觉条目固定部分 78 字节） */
+function entryKids(init) {
+  const st = init.indexOf('stsd') - 4, ent = st + 16, end = ent + init.readUInt32BE(ent), out = [];
+  for (let o = ent + 8 + 78; o + 8 <= end; o += init.readUInt32BE(o)) { if (init.readUInt32BE(o) < 8) break; out.push(init.toString('latin1', o + 4, o + 8)); }
+  return out;
+}
 
 for (const file of process.argv.slice(2)) {
   console.log(file);
@@ -64,6 +70,23 @@ for (const file of process.argv.slice(2)) {
       const ver = at > 0 ? init.readUInt16BE(at + 4 + 8) : -1;
       if (ver !== 0 || init.indexOf('wave') >= 0) fail(`音频 init 段不是 ISO 写法（条目 version ${ver}${init.indexOf('wave') >= 0 ? '，还有 wave' : ''}）`);
       if (tr.stsdNote) console.log('    ' + tr.stsdNote);
+    }
+    /* 视频条目里 QuickTime 才有的 fiel / chrm 不进 init 段（mp4.js 的 isoVideo；11-14 一台 Tizen 5.5 的 init 段带着它们进不去）。
+     * 还拿同一份 moov 把 fiel 改名成 chrm 再来一遍（ffmpeg 不写 chrm） */
+    if (tr.kind === 'video') {
+      const qt = (init) => entryKids(Buffer.from(init)).filter(k => k === 'fiel' || k === 'chrm');
+      if (qt(parts[0]).length) fail(`视频 init 段里还有 ${qt(parts[0]).join('、')}`);
+      if (tr.stsdNote) console.log('    ' + tr.stsdNote);
+      const copy2 = Buffer.from(moovBytes);
+      let at = -1;      // fiel 盒子本身（10 字节），hvcC 的数据里也可能碰巧有这四个字母
+      for (let i = copy2.indexOf('fiel'); i > 0; i = copy2.indexOf('fiel', i + 1)) if (copy2.readUInt32BE(i - 4) === 10) { at = i; break; }
+      if (/fiel/.test(tr.stsdNote || '') && at > 0) {
+        copy2.write('chrm', at);
+        const tr2 = Mp4.parseMoov(new Uint8Array(copy2)).tracks.find(x => x.kind === 'video');
+        const left = qt(Mp4.initSegment(tr2));
+        console.log('    fiel 改名成 chrm：' + tr2.stsdNote);
+        if (left.length || !/chrm/.test(tr2.stsdNote)) fail('chrm 没去掉：' + tr2.stsdNote);
+      }
     }
     let a = 0, seq = 1;
     t = performance.now();

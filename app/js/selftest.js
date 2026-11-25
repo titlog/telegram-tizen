@@ -229,21 +229,41 @@
     /* 这台电脑上 test/serve.mjs 给的测试片（RATE=0 LAT=0 node test/serve.mjs；生成命令在 test/check.mjs 头），和 sintel() 一样
      * 只把这一部的 TG.source 换成 HTTP。11-14：声音条目是 QuickTime 写法（mp4a 在 wave 里）的、Opus 声道数和 dOps 对不上的，
      * 电视的 MP4 解析器 init 段一进去就拒；mp4.js 改写成 ISO 写法之后要放得起来 */
-    async function localPlay(name, what) {
+    async function localPlay(name, what, expect) {
+        expect = expect || {};
         var url = String(REPORT_TO).replace(/:\d+\/?$/, ":8768") + "/test/media/" + name, orig = TG.source, src;
         try { src = await Web.httpSource(url); }
         catch (e) { check(what, false, "取不到 " + name + "（先开 RATE=0 LAT=0 node test/serve.mjs）：" + (e && e.message)); return; }
         var it = { key: "selftest:" + name, fileKey: "selftest:" + name, title: name + "（自测）", fileName: name, asFile: true, size: src.size,
                    duration: 12, date: new Date(), msg: { id: 0, chat: { id: 0 } }, info: { year: "", rating: "", director: "" }, mime: "video/mp4", http: url };
         TG.source = function (x) { return x.http ? src : orig(x); };
+        var incidents = [], origIncident = Diag.incident;
+        Diag.incident = function (r) { incidents.push(r); origIncident(r); };
         try {
             Store.setProgress(it.fileKey, 0, 12, it.title);
             var t0 = Date.now();
             window.__app.play(it);
+            if (expect.refuse) {
+                /* 放不了的：屏幕上说清楚是什么、不放留 issue 的码、不当出事 */
+                var said = await until(function () { return expect.refuse.test(txt("perr")) ? true : null; }, 30000);
+                check(what, !!said && !document.querySelector("#perr .report") && !incidents.length,
+                      "错误「" + txt("perr") + "」" + (document.querySelector("#perr .report") ? "，放了留 issue 的码" : "") + (incidents.length ? "，当出事了：" + incidents.join(" / ") : ""));
+                await backHome();
+                return;
+            }
             var ok = await until(playing(1), 30000);
             check(what, !!ok, ok ? (Date.now() - t0) + "ms 走起来，" + vid().videoWidth + "x" + vid().videoHeight + "，提示「" + txt("toast") + "」" : "30 秒没走起来：" + stateNow());
+            if (ok && expect.pause) {
+                /* 暂停 6 秒再接着放（11-21 一台 Tizen 5.5：暂停几分钟再放，画面不走、20 秒后监视重开才好）：接着放 3 秒内播放头要走。
+                 * 日志里那行「接着放（暂停了…）」写着按下时、2 秒后的 readyState 和各轨缓冲 */
+                press(13); await wait(6000);         // 播放器里确认键松开才算短按（app.js 的 enterDown / keyup）
+                var b = vid().currentTime, t1 = Date.now();
+                press(13);
+                var go = await until(function () { return vid().currentTime > b + 0.5 && !vid().paused ? true : null; }, 3000);
+                check("暂停 6 秒再接着放，3 秒内走起来", !!go, go ? (Date.now() - t1) + "ms，" + b.toFixed(1) + " → " + vid().currentTime.toFixed(1) : "没走：" + stateNow() + "，readyState " + vid().readyState);
+            }
             await backHome();
-        } finally { TG.source = orig; }
+        } finally { TG.source = orig; Diag.incident = origIncident; }
     }
 
     async function samplesRun() {
@@ -259,9 +279,12 @@
                 } catch (e) { check("解析 archive.org " + IA[i], false, Math.round(performance.now() - t0) + "ms，" + e.message); }
             }
             check("卡片标题去掉站名", Web.title("https://archive.org/details/x", "His Girl Friday : Free Download, Borrow, and Streaming : Internet Archive") === "His Girl Friday");
-            await localPlay("g_qt_wave.mov", "QuickTime 写法的声音条目（mp4a 在 wave 里）放起来");
+            await localPlay("g_qt_wave.mov", "QuickTime 写法的声音条目（mp4a 在 wave 里）放起来", { pause: true });
             await localPlay("h_opus_chmismatch.mp4", "Opus 条目的声道数和 dOps 对不上的放起来");
             await localPlay("l_frag.mp4", "分段 MP4（fragmented）整份读进来放起来");
+            /* 标着 video/mp4 的 MPEG-TS（11-16…25 五份上传，以前是「不认识的文件格式」、当出事）：
+             * ffmpeg -f lavfi -i testsrc=duration=5:size=320x240 -c:v libx264 -f mpegts test/media/t_ts_as.mp4 */
+            await localPlay("t_ts_as.mp4", "标成 MP4 的 MPEG-TS：说是 MPEG-TS、不放码、不当出事", { refuse: /MPEG-TS/ });
             await webPlay("Sita_Sings_the_Blues", true);
             await webPlay("TheGeneral1926", false);
             await sintel();
@@ -387,7 +410,7 @@
             check("音乐：ALAC 的 m4a 说电视解不了", !!said, "状态「" + txt("mu-state") + "」");
             /* <audio> 不收的大 WAV（11-13 越南一台 Tizen 6.0，42–52 MB 都是 Format error）改用 Web Audio：让 <audio> 假装不收，
              * FLAC 那首照样出声、暂停、接着放、快进（music.js 的 pcmPlayer） */
-            Music.test.rejectWav(true);
+            Music.test.reject(["wav"]);
             t0 = Date.now();
             window.__app.playMusic(list, 1);
             ok = await until(function () { var x = m(); return x.index === 1 && x.time > 1 && !x.paused ? true : null; }, 60000);
@@ -402,8 +425,32 @@
                 var j2 = await until(function () { return m().time > b2 + 8 ? true : null; }, 5000);
                 check("音乐：Web Audio 快进 10 秒", !!j2, b2.toFixed(1) + " → " + m().time.toFixed(1));
             }
+            /* <audio> 不收 MP3 / M4A（11 月：Tizen 10 上每一首都是 DECODER_ERROR_NOT_SUPPORTED，Tizen 6.0 的 MP3 是 Format error，
+             * Tizen 9 放得了）：假装不收，decodeAudioData 整首解开、用 Web Audio 放（music.js 的 bufPlayer）。参考机是 Tizen 9，
+             * 这一步量的是「这台电视上 decodeAudioData 解不解得了、要多久」，日志里那行「改用 Web Audio 放起来了」写着 */
+            Music.test.reject(["mp3", "m4a"]);
+            for (var di = 0; di < 3; di += 2) {
+                t0 = Date.now();
+                window.__app.playMusic(list, di);
+                ok = await until((function (i) { return function () { var x = m(); return x.index === i && x.time > 1 && !x.paused ? true : null; }; })(di), 30000);
+                check("音乐：<audio> 不收的 " + list[di].ext.toUpperCase() + " 改用 Web Audio 解码放", !!ok, (Date.now() - t0) + "ms，t=" + m().time.toFixed(1) + "，状态「" + txt("mu-state") + "」");
+                if (ok && di === 0) {
+                    key(13); await wait(1000); var q1 = m(); await wait(1000); var q2 = m();
+                    key(13); await wait(1500); var q3 = m();
+                    var b3 = m().time;
+                    key(39);
+                    var j3 = await until(function () { return m().time > b3 + 8 ? true : null; }, 5000);
+                    check("音乐：decodeAudioData 那条暂停、接着放、快进", q1.paused && Math.abs(q2.time - q1.time) < 0.1 && !q3.paused && q3.time > q2.time + 0.5 && !!j3,
+                          [q1.time, q2.time, q3.time, b3, m().time].map(function (x) { return x.toFixed(1); }).join(" → "));
+                }
+            }
+            /* 太长的不解（内存）：说清楚、不当出事 */
+            var long = Object.assign({}, list[0], { key: "selftest:mulong", duration: 20 * 60 });
+            window.__app.playMusic([long], 0);
+            said = await until(function () { return /8/.test(txt("mu-state")) && /20/.test(txt("mu-state")) ? true : null; }, 15000);
+            check("音乐：20 分钟的 MP3 <audio> 不收时说太长、不解", !!said, "状态「" + txt("mu-state") + "」");
         } finally {
-            Music.test.rejectWav(false);
+            Music.test.reject([]);
             window.__app.stopMusic();
             TG.source = orig.source; TG.thumb = orig.thumb;
         }

@@ -72,12 +72,12 @@ node test/apikey.mjs                             # 改 apikey.js、填写页、�
 zsh tools/deploy.sh --diag                       # 诊断日志在电视上走一遍（7 步，1 分钟）；先开 PORT=8096 node ../bilibili-tizen/tools/diag-local.mjs
 zsh tools/deploy.sh --loginexpiry                # 扫码页上后台线程的连接作废，看是不是重连、换码（3 步，2 分钟；会添加一个账号再取消）
 zsh tools/deploy.sh --samples                    # README「拿什么试」那几部片在电视上走一遍：archive.org 解析 + 1080p 连放 + 快进，Sintel MKV + 字幕，
-                                                 # 加 test/media 里两部声音条目要改写的、一段分段 MP4（18 步，2 分钟）；先开 RATE=0 LAT=0 node test/serve.mjs
+                                                 # 加 test/media 里两部声音条目要改写的、一段分段 MP4、暂停 6 秒再放、标成 MP4 的 TS（20 步，2 分钟）；先开 RATE=0 LAT=0 node test/serve.mjs
 zsh tools/deploy.sh --legacy                     # 在这台（有 BigInt 的）电视上强制用老电视那份 mtcute：正常那份、老那份各放同一部片子对照
-zsh tools/deploy.sh --music                      # 音乐在电视上走一遍：MP3 → FLAC（软件解）→ M4A，换歌、快进、返回接着放，<audio> 不收的 WAV 改用 Web Audio（11 步）；先开 RATE=0 LAT=0 node test/serve.mjs
+zsh tools/deploy.sh --music                      # 音乐在电视上走一遍：MP3 → FLAC（软件解）→ M4A，换歌、快进、返回接着放，<audio> 不收的 WAV / MP3 / M4A 改用 Web Audio（15 步）；先开 RATE=0 LAT=0 node test/serve.mjs
 node ../bilibili-tizen/tools/diag-logs.mjs --app telegram-tizen   # 读别人电视传上来的（--device 编号 / <id>）
 zsh tools/release.sh                             # 发布包 → dist/telegram-tizen-<版本>.wgt
-node test/serve.mjs & node test/run.mjs media/a_h264_fast.mp4 "media/b_h264_moovend.mp4?start=30"   # 改 player.js 之后
+node test/serve.mjs & node test/run.mjs media/a_h264_fast.mp4 "media/b_h264_moovend.mp4?start=30"   # 改 player.js 之后（造出来的情况：?stall= / ?fatal=1 / ?resume= / ?ref=1，见 player.html 头）
 node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui-*.png（ONLY=mkv / acct / music / history / report 只跑那一段，ONLY=gone 只在单跑时走（会改账号），UILANG=en 英文界面）
 ```
 **自测构建（--diag / --loginexpiry / --samples / --music）测完马上 `zsh tools/deploy.sh` 装回正常构建。**
@@ -91,20 +91,24 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
   compat.js），没有 BigInt 的用 `tg.legacy.js`（大数换 JSBI，`build/legacy/`）。我们自己的代码按 63 写（syntax-verify 卡着；正则别用 `\p{}`、
   具名分组）。改了 mtcute 的版本，`build/legacy/patches.mjs` 会对不上、构建停下来，要重新对。→ [docs/老电视兼容.md](docs/老电视兼容.md)
 - **mtcute 在后台线程**；给它 wasm 先 `WebAssembly.compile`；下载没背压，靠 `throttle` 钩子；起点按 512KB 对齐；挂到后台一分钟以上连接作废，
-  要重连（打开来源、来源列表碰上了重连再来一次，不当出事）；`FLOOD_WAIT` 半分钟以内的等完再试。→ [docs/播放引擎.md](docs/播放引擎.md)、
+  要重连（打开来源、来源列表碰上了重连再来一次，不当出事）；`FLOOD_WAIT` 半分钟以内的等完再试，两步验证密码错多了的说要等多久、不当出事。→ [docs/播放引擎.md](docs/播放引擎.md)、
   [docs/多账号.md](docs/多账号.md)
 - **播放引擎**：自己写的 MP4 / MKV 解析 + MSE；按秒背压；音视频隔得远就分两路读；**三星的 MSE 不跨空档**，起点要落在音视频都有的地方；
   open GOP 跳转丢前导帧、先清缓冲再挪播放头；H.264 级别写小了改够、avcC 的 profile 写成 0 照 SPS 改；MKV 结尾 `ended` 不一定来；
   **高过 1088 的 H.264 在 Tizen 5.5 / 6.0 上解不了**（说清楚、不当出事）；10 位的 H.264（High 10）、开头就没有能放的视频轨、分段 MP4
-  也说清楚、不当出事；**分段 MP4 64 MB 以内整份读进来、从 moof 拼样本表**（`parseMoov(moov, 整份)`）。**声音条目进 init 段前改成 ISO 写法**（QuickTime 的 `wave`、Opus 声道数和 `dOps` 对不上，电视的解析器都拒，`isoAudio()`）。
-  → [docs/播放引擎.md](docs/播放引擎.md)
+  也说清楚、不当出事；**分段 MP4 64 MB 以内整份读进来、从 moof 拼样本表**（`parseMoov(moov, 整份)`）。**声音条目进 init 段前改成 ISO 写法**（QuickTime 的 `wave`、Opus 声道数和 `dOps` 对不上，电视的解析器都拒，`isoAudio()`）；
+  视频条目去掉 QuickTime 的 `fiel` / `chrm`（`isoVideo()`，没证实是 Tizen 5.5 拒 init 段的原因）。**标成 MP4 的 MPEG-TS** 说清楚、不当出事（不放）。
+  **下载停了、重开也没字节不再无限重开**：`stalled` 一级级升（重开 → 重取消息 → mtcute `recreateDc` 重建那个 DC → 放弃并说清楚），记文件 / 主连接各在哪个 DC。
+  `fatal` 之后计时器都停（`sess.dead`），读 `buffered` 走 `sbBuffered()`。→ [docs/播放引擎.md](docs/播放引擎.md)
 - **电视解不了的音频**：DTS、TrueHD、ALAC，还有**嘴上说认的 FLAC**（MSE、`<audio>` 都不解）。视频里的 FLAC 音轨当放不了；
-  音乐里的 FLAC 用 flac.js 软件解成 WAV（`<audio>` 不收的大 WAV 改用 Web Audio 放，`pcmPlayer`）；音乐里的 ALAC 下的时候看 moov 认出来、说清楚、跳下一首。→ [docs/音乐.md](docs/音乐.md)
+  音乐里的 FLAC 用 flac.js 软件解成 WAV（`<audio>` 不收的大 WAV 改用 Web Audio 放，`pcmPlayer`）；音乐里的 ALAC 下的时候看 moov 认出来、说清楚、跳下一首。
+  **Tizen 10 / 6.0 / 5.5 有的 `<audio>` 连 MP3 / M4A 都不收**（error 4）：改用 `decodeAudioData` 整首解开、Web Audio 放（`bufPlayer`），8 分钟以上不解（内存）。→ [docs/音乐.md](docs/音乐.md)
 - **`video.src`（三星自己的播放器）放网上的 MP4 不可靠**：网页链接里的 MP4 走播放引擎（`Web.httpSource`）。音频做成 blob 给 `<audio>` 是好的。
   → [docs/网页链接.md](docs/网页链接.md)
 - **遥控器**：长按确认 650ms 开菜单，按住时的自动重复不算新的一下；在卡片上按确认进播放器 / 音乐画面，那一下的重复和松开也落在里面，
   等松开过一次才认确认键（`S.enterArmed`）。**CSS 滤镜在电视上很贵**，模糊用小图拉伸。→ [docs/界面.md](docs/界面.md)
-- **界面文字**：写中文、套 `T()`（app.js）/ `tx()`（别的文件），英文在 i18n.js；`test/i18n.mjs` 卡着。→ [docs/界面.md](docs/界面.md)
+- **界面文字**：写中文、套 `T()`（app.js）/ `tx()`（别的文件），英文在 i18n.js；`test/i18n.mjs` 卡着。**界面语言没手动选过就跟系统语言、什么都不存**
+  （1.2.9 以前外国新用户第二次打开会变中文；被那样存成 zh 的一次性改回 en，`tg.lang.fix1`）。→ [docs/界面.md](docs/界面.md)
 - **隐私**：往日志放群名、片名、文件名、搜索词、地址、账号名、ID 一律 `Diag.priv()`，diag-verify 卡着。**API ID / Hash 不进仓库、日志、
   issue、发布说明。** → [docs/自动更新与诊断日志.md](docs/自动更新与诊断日志.md)、[docs/发布包与API-ID.md](docs/发布包与API-ID.md)
 - **自动更新**：用更新包启动、两秒内出了 js 错误的下次退回安装包；没出错就没了的再给一次，连着两次才标坏（boot.js，只随安装包走）。
@@ -114,7 +118,8 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
   进不去的群 / 频道说清楚、不当出事、从来源栏拿掉。→ [docs/多账号.md](docs/多账号.md)
 - **README.md 是英文**（GitHub 默认展示），中文在 README.zh.md；截图两套。→ [docs/README截图.md](docs/README截图.md)
 - **电视上还没验证**：Tizen 5.0 / 5.5 / 6.x 真机；AC-3 有没有声音；换音轨重开停在原处；真遥控器的长按；下一集倒计时；切换界面语言；
-  添加 / 切换 / 退出账号；在电视上用遥控器填 API ID。看到这些的日志再划掉。
+  添加 / 切换 / 退出账号；在电视上用遥控器填 API ID；`<audio>` 不收的 MP3 / M4A 用 `decodeAudioData` 解不解得了（日志「改用 Web Audio 放起来了 / 也放不了」）；
+  下载卡死时哪一步让字节回来（「字节又来了」）；去掉 `fiel` / `chrm` 之后 Tizen 5.5 收不收 init 段；暂停久了再放画面不走（「接着放（暂停了…）」）。看到这些的日志再划掉。
 
 ## 专题（docs/）
 

@@ -31,16 +31,23 @@ var TG = (function () {
   return {
     init: async function () {}, mode: function () { return "stub"; },
     me: async function () { return localStorage.getItem("stub.logged") ? { id: 101, displayName: "测试" } : null; },
-    login: function (onUrl) {
+    login: function (onUrl, onScanned, askPassword) {
       var api = ApiKey.get();
       localStorage.setItem("stub.tried", (localStorage.getItem("stub.tried") || "") + api.from + ":" + api.id + ";");
       if (api.hash !== GOOD) { var e = new Error("Telegram API error 400: API_ID_INVALID"); e.text = "API_ID_INVALID"; e.code = 400; return Promise.reject(e); }
       onUrl("tg://login?token=STUB");
+      /* 两步验证密码错多了：交了密码，Telegram 答 FLOOD_WAIT（11-22 那台：FLOOD_WAIT_3536） */
+      if (localStorage.getItem("stub.pwflood")) {
+        onScanned();
+        return askPassword().then(function () { var f = new Error("Telegram API error 420: FLOOD_WAIT_3536"); f.code = 420; throw f; });
+      }
       return new Promise(function (resolve) { setTimeout(function () { localStorage.setItem("stub.logged", "1"); resolve(); }, 800); });
     },
     logout: async function () {}, videoCount: async function () { return 0; }, sources: async function () { return []; },
     videos: async function () { return { items: [], next: undefined, total: 0 }; }, links: async function () { return []; },
-    search: async function () { return { items: [], total: 0 }; }, subtitlesFor: async function () { return []; }, describe: function (x) { return x; }
+    search: async function () { return { items: [], total: 0 }; }, subtitlesFor: async function () { return []; }, describe: function (x) { return x; },
+    leaving: function () { return false; },
+    floodWait: function (e) { var m = /FLOOD_WAIT_(\\d+)/.exec(String(e && e.message)); return m ? +m[1] : 0; }
   };
 })();`;
 const bundle = fs.existsSync(ROOT + 'app/js/tg.bundle.js') ? null : 'window.TGLib = { qrSvg: function () { return "<svg></svg>"; } };';
@@ -166,6 +173,19 @@ await fresh('var TG_API_ID = 7654321; var TG_API_HASH = "' + GOOD + '";');
 s = await until(async () => { const x = await st(); return x.logged && x.home ? x : null; }, 8000);
 ok(s && !s.stored && /build:7654321/.test(s.tried) && !s.form, '不出填写页，直接扫码、进主页：' + JSON.stringify(s && { tried: s.tried, stored: s.stored }));
 ok(logs.some((l) => /API ID 是安装包里带的/.test(l)) && logs.some((l) => /API ID 是电视上填的/.test(l)), '日志里写着这次用的是哪一组');
+console.log('两步验证密码错了太多次（Telegram 答 FLOOD_WAIT_3536）');
+cfg = 'var REPORT_TO = ""; var TG_API_ID = 7654321; var TG_API_HASH = "' + GOOD + '";';
+await page.goto(APP, { waitUntil: 'load' });
+await page.evaluate(() => { localStorage.clear(); localStorage.setItem('tg.lang.v1', /^en/.test(navigator.language) ? 'en' : 'zh'); localStorage.setItem('stub.pwflood', '1'); });
+await page.reload({ waitUntil: 'load' });
+ok(await until(() => page.evaluate(() => document.getElementById('pwbox').className === 'on'), 5000), '扫上了、要两步验证密码');
+await page.evaluate(() => { window.__inc = []; var o = Diag.incident; Diag.incident = function (r) { window.__inc.push(r); o(r); }; });
+await page.fill('#pw', 'wrong-password');      // 密码页上 document 的按键处理拦着打字（电视上是屏幕键盘），直接填
+await remote(13);
+s = await until(() => page.evaluate(() => { var h = document.getElementById('how'); return /59/.test(h.textContent) ? { text: h.textContent, qr: !!h.querySelector('.report'), inc: window.__inc } : null; }), 5000);
+ok(s && !s.qr && !s.inc.length && !/FLOOD_WAIT/.test(s.text), '启动失败页照直说要等 59 分钟，不放 issue 码、不当出事、不写原话：' + JSON.stringify(s));
+ok(logs.some((l) => /两步验证密码错了太多次，Telegram 让等 3536 秒/.test(l)), '日志里记着让等多久');
+await page.screenshot({ path: ROOT + 'logs/api-5-pwflood.png' });
 ok(!logs.some((l) => l.includes(GOOD) || l.includes(BAD)), '日志里没有 hash');
 ok(!errors.length, '没有页面错误' + (errors.length ? '：' + errors.join(' / ') : ''));
 

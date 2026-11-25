@@ -8,20 +8,37 @@
 <script src="../app/js/player.js"></script>
 <script>
 /* 桌面测试台：HTTP Range 当数据源，跑一套固定的动作，每步报一行（console，run.mjs 收）。
- *   player.html?f=media/a.mp4&start=30 */
+ *   player.html?f=media/a.mp4&start=30
+ * 几种造出来的情况（都是 11 月别人电视的诊断日志里的）：
+ *   stall=K   出画面后跳到一半，数据源从此一个字节都不给（主连接还在、下载卡死那样），看播放器重开、升级（recover 1、2）、
+ *             放弃；K>0 时 recover(K) 之后字节又来，要看到「字节又来了」、接着放。K=0 一直不给，约 100 秒后要说「下载停了」（~2 分钟）
+ *   fatal=1   出画面之前媒体元素出错、MediaSource 被摘掉：之后 95 秒里不能有 js 错误（以前第 90 秒读摘掉的 SourceBuffer 抛错）
+ *   resume=ms 出画面后暂停这么久再接着放：要有「接着放（暂停了…）」那行
+ *   ref=1     第一个请求报 FILE_REFERENCE_EXPIRED、数据源已经换好了引用（tg.js 标 freshRef）：要「马上」接着取，不等 2 秒
+ *   TS 冒充 MP4：f=media/t_ts_as.mp4（ffmpeg -f lavfi -i testsrc=duration=5:size=320x240 -c:v libx264 -f mpegts test/media/t_ts_as.mp4）
+ *             要「打不开」、说是 MPEG-TS、known */
 var q = new URLSearchParams(location.search);
 var video = document.getElementById("v");
 function R(s) { console.log("P: " + s); }
 function sleep(t) { return new Promise(function (r) { setTimeout(r, t); }); }
 
+var blocked = false, unblockAt = +(q.get("stall") || 0), refErr = !!q.get("ref");
+function hang(signal) { return new Promise(function (r) { var t = setInterval(function () { if (!blocked || (signal && signal.aborted)) { clearInterval(t); r(); } }, 200); }); }
 function httpSource(url, size) {
     var CH = Player.CH;
     return {
         size: size,
+        dcs: function () { return Promise.resolve("：文件在 DC4，主连接在 DC2（测试台）"); },
+        recover: function (level) {
+            if (unblockAt && level >= unblockAt) { blocked = false; return Promise.resolve("测试台：断流解开了"); }
+            return Promise.resolve("测试台：还断着");
+        },
         stream: function (offset, signal, throttle) {
             var start = Math.floor(offset / CH) * CH;
             async function* gen() {
+                if (refErr) { refErr = false; var e = new Error("Telegram API error 400: FILE_REFERENCE_EXPIRED"); e.freshRef = true; throw e; }
                 for (var pos = start; pos < size;) {
+                    if (blocked) { await hang(signal); if (signal && signal.aborted) { return; } }
                     await throttle();
                     var r = await fetch(url, { headers: { Range: "bytes=" + pos + "-" + (Math.min(size, pos + CH) - 1) }, signal: signal });
                     var b = new Uint8Array(await r.arrayBuffer());
@@ -62,11 +79,46 @@ async function waitMoving(from, ms) {
             R("主线程堵了 " + q.get("starve") + "ms，现在 t=" + video.currentTime.toFixed(2));
         });
     }
-    try { await p.open(httpSource(url, size), { startAt: +(q.get("start") || 0) }); }
-    catch (e) { R("RESULT open 失败 " + e.message); return; }
+    var errs = 0;
+    window.addEventListener("error", function (e) { errs++; R("js 错误 " + e.message); });
+    var opts = { startAt: +(q.get("start") || 0) };
+    if (q.get("fatal")) {
+        /* 出画面之前：媒体元素报错（播放器 fatal）、MediaSource 跟着被摘掉（电视上解码出错时就是这样） */
+        opts.onTracks = function () { setTimeout(function () { video.dispatchEvent(new Event("error")); video.removeAttribute("src"); video.load(); }, 0); };
+    }
+    try { await p.open(httpSource(url, size), opts); }
+    catch (e) {
+        if (!q.get("fatal")) { R("RESULT open 失败 " + e.message + (e.known ? "（known）" : "")); return; }
+        R("出错了（" + e.message + "），等 95 秒看有没有 js 错误");
+        await sleep(95000);
+        R("RESULT fatal 之后 95 秒：js 错误 " + errs + " 个，状态序列 " + states.join(","));
+        R("DONE");
+        return;
+    }
     R("RESULT 出画面 " + Math.round(performance.now() - t0) + "ms t=" + video.currentTime.toFixed(2));
     await sleep(2500);
     R("RESULT 播了 2.5 秒 t=" + video.currentTime.toFixed(2) + " 各轨 " + p.debug());
+    if (q.get("stall") !== null) {
+        /* 跳到一半（不在缓冲里，要重新读）、同时断流 */
+        blocked = true;
+        p.seek(p.duration() * 0.5, 0);
+        await sleep(1500);
+        R("跳了 1.5 秒：t=" + video.currentTime.toFixed(1) + "，各轨 " + p.debug());
+        var ts0 = performance.now(), to = video.currentTime;
+        while (performance.now() - ts0 < 150000 && !states.some(function (x) { return /^error/.test(x); }) && !(video.currentTime > to + 2 && !blocked)) { await sleep(500); to = Math.min(to, video.currentTime); }
+        R("RESULT 断流：" + Math.round((performance.now() - ts0) / 1000) + " 秒后 t=" + video.currentTime.toFixed(1) + "，" + (blocked ? "还断着" : "解开了") + "，状态序列 " + states.join(",") + "，js 错误 " + errs);
+        R("DONE");
+        return;
+    }
+    if (q.get("resume")) {
+        p.toggle();
+        await sleep(+q.get("resume"));
+        p.toggle();
+        await sleep(2600);
+        R("RESULT 暂停 " + q.get("resume") + "ms 再接着放：t=" + video.currentTime.toFixed(2) + (video.paused ? " 暂停着" : " 在放"));
+        R("DONE");
+        return;
+    }
 
     var dur = p.duration();
     var steps = [["快进 +10", function () { p.seek(video.currentTime + 10, 1); }],

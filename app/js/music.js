@@ -4,6 +4,7 @@
  * 几秒；放着这首就把下一首下好，切歌不用等。内存里最多留 3 首（这首、下一首、上一首）。
  * FLAC 电视解不了（<audio>、MP4、MSE 都试过），app 下的时候交给 flac.js 边下边解成 WAV（stage "decode" 是在等它解完）。
  * 别的放起来不报错、一直不走的，12 秒不走就当放不了，3 秒后放下一首。
+ * <audio> 不收的（报 error 4）：WAV 读出 PCM、别的（MP3 / M4A…）用 decodeAudioData 整首解开，都改用 Web Audio 放（见 viaWebAudio）。
  *
  *   var m = Music.create(audio元素, { report, onState(phase, info), load(item, onProgress(got, total, stage), signal) → Promise<Blob> })
  *   m.play(list, i)   从 list 的第 i 首放起，放完一首接下一首
@@ -16,9 +17,13 @@ var Music = (function () {
     var tx = typeof I18n !== "undefined" ? I18n.t : function (s) { var a = arguments; return String(s).replace(/\{(\d)\}/g, function (m, i) { return a[+i + 1]; }); };
     var MIME = { mp3: "audio/mpeg", m4a: "audio/mp4", aac: "audio/aac", flac: "audio/flac", ogg: "audio/ogg", oga: "audio/ogg", opus: "audio/ogg", wav: "audio/wav" };
     var KEEP = 3, STUCK_MS = 12000, SKIP_MS = 3000, MAX_FAILS = 5;
+    /* decodeAudioData 整首解成 32 位浮点：44.1kHz 立体声一分钟 21 MB，解的时候引擎里还要再多一两份。超过这么长的不解，说清楚 */
+    var DECODE_MAX_SEC = 8 * 60;
 
     function errStr(e) { return (e && (e.message || e.name)) || String(e); }
     function mb(n) { return (n / 1048576).toFixed(1) + "MB"; }
+    /* close() 返回 Promise，关过的再关会 reject：接住，不然记成一次「未处理的 Promise 异常」 */
+    function closeCtx(ctx) { try { var p = ctx.close(); if (p && p.catch) { p.catch(function () {}); } } catch (e) {} }
 
     /* WAV 里的 16 位 PCM（flac.js 拼的就是这种）：{ ch, rate, pcm: Int16Array（交错） }，不是这种就 null */
     function wavPcm(ab) {
@@ -86,18 +91,59 @@ var Music = (function () {
             },
             pause: function () { paused = true; if (ctx.suspend) { ctx.suspend(); } },
             seek: function (sec) { from(sec); },
-            stop: function () { done = true; clearInterval(timer); stopAll(); try { ctx.close(); } catch (e) {} }
+            stop: function () { done = true; clearInterval(timer); stopAll(); closeCtx(ctx); }
         };
         return p;
     }
 
-    /* 自测（deploy.sh --music）：让 <audio> 假装不收 WAV，走上面那条路 */
-    var rejectWav = false;
+    /* decodeAudioData 解出来的整首（AudioBuffer）：一个 AudioBufferSourceNode 从 pos 起放；暂停 = suspend，跳转 = 停掉从那里重放。
+     * 接口和 pcmPlayer 一样 */
+    function bufPlayer(ctx, buf, onEnd) {
+        var dur = buf.duration, src = null, startCtx = 0, startPos = 0, paused = false, done = false, timer = 0, started = false;
+        function from(pos) {
+            if (src) { try { src.stop(); } catch (e) {} }
+            startPos = Math.max(0, Math.min(pos, dur));
+            startCtx = ctx.currentTime + 0.05;
+            src = ctx.createBufferSource();
+            src.buffer = buf;
+            src.connect(ctx.destination);
+            src.start(startCtx, startPos);
+            done = false;
+        }
+        function time() { return started ? Math.max(0, Math.min(dur, startPos + Math.max(0, ctx.currentTime - startCtx))) : 0; }
+        function tick() { if (!done && !paused && started && time() >= dur - 0.02) { done = true; clearInterval(timer); onEnd(); } }
+        return {
+            duration: dur,
+            time: time,
+            paused: function () { return paused; },
+            play: function () {
+                paused = false;
+                return (ctx.resume ? ctx.resume() : Promise.resolve()).then(function () {
+                    if (!started) { started = true; from(0); }
+                    clearInterval(timer);
+                    timer = setInterval(tick, 500);
+                });
+            },
+            pause: function () { paused = true; if (ctx.suspend) { ctx.suspend(); } },
+            seek: function (sec) { from(sec); },
+            stop: function () { done = true; clearInterval(timer); if (src) { try { src.stop(); } catch (e) {} } src = null; closeCtx(ctx); }
+        };
+    }
+    /* 老引擎的 decodeAudioData 只有回调写法；新的两样都给、还返回 Promise —— 那个 Promise 接住，免得同一个错误再报一次「未处理」 */
+    function decodeAudio(ctx, ab) {
+        return new Promise(function (resolve, reject) {
+            var p = ctx.decodeAudioData(ab, resolve, function (e) { reject(e || new Error("decodeAudioData 失败（没给原因）")); });
+            if (p && p.catch) { p.catch(function () {}); }
+        });
+    }
+
+    /* 自测（deploy.sh --music）：让 <audio> 假装不收某几种（"wav" = FLAC 解出来的那种），走 Web Audio 那条路 */
+    var fakeReject = {};
 
     function create(audio, o) {
         var R = function (s) { if (o.report) { o.report(s); } };
         var list = [], idx = -1, token = 0, cache = {}, order = [], fails = 0, watch = 0, skip = 0, pre = 0;
-        var wav = null;      // 这一首走的 Web Audio（pcmPlayer）；null 是 <audio>
+        var wav = null;      // 这一首走的 Web Audio（pcmPlayer / bufPlayer）；null 是 <audio>
         function dropWav() { if (wav) { wav.stop(); wav = null; } }
 
         function mimeOf(it) { return it.mime || MIME[it.ext] || "audio/mpeg"; }
@@ -151,10 +197,13 @@ var Music = (function () {
             o.onState("loading", { got: 0, total: it.size });
             fetchTrack(it, function (got, total, stage) { if (my === token) { o.onState("loading", { got: got, total: total, stage: stage }); } }).then(function (url) {
                 if (my !== token) { return; }
-                if (rejectWav && it.ext === "flac") { R("自测：假装 <audio> 不收这份 WAV"); audio.pause(); audio.removeAttribute("src"); viaWebAudio(my, it, url, "自测"); return; }
+                var kind = it.ext === "flac" ? "wav" : String(it.ext || "").toLowerCase();
+                if (fakeReject[kind]) { R("自测：假装 <audio> 不收这份 " + kind); audio.pause(); audio.removeAttribute("src"); viaWebAudio(++token, it, url, "自测：假装 <audio> 不收"); return; }
                 audio.src = url;
                 var p = audio.play();
-                if (p && p.catch) { p.catch(function (e) { if (my === token && e.name !== "AbortError") { fail(my, "play() " + errStr(e)); } }); }
+                /* <audio> 不收的时候先来 error 事件、再是 play() 的 NotSupportedError（「no supported source」）：那一下归 error 事件管
+                 * （改用 Web Audio，或者报一次放不了），这里不再报一次 —— 以前每首记两次放不了，连着 5 首放不了的数也按两倍数 */
+                if (p && p.catch) { p.catch(function (e) { if (my === token && e.name !== "AbortError" && !(e.name === "NotSupportedError" && audio.error)) { fail(my, "play() " + errStr(e)); } }); }
                 /* 放不起来也不报错的（FLAC）：12 秒播放头没动就算放不了 */
                 var t0 = Date.now();
                 watch = setInterval(function () {
@@ -178,22 +227,58 @@ var Music = (function () {
             if (idx + 1 < list.length && fails < MAX_FAILS) { skip = setTimeout(function () { if (my === token) { start(idx + 1); } }, SKIP_MS); }
         }
 
-        /* <audio> 报错的那首 WAV 改用 Web Audio 放：下好的 blob 里读出 PCM */
+        /* <audio> 不收的那首改用 Web Audio 放（my 是新的一轮：<audio> 那边迟到的回调都对不上了）：
+         * - FLAC 解出来的 WAV（<audio> 不收大 WAV，11-13 那台 Tizen 6.0）：下好的 blob 里读出 16 位 PCM，pcmPlayer 一段段放；
+         * - 别的（MP3、M4A…）：Tizen 10 上 <audio> 对每一首 MP3 / M4A 都是 DECODER_ERROR_NOT_SUPPORTED，Tizen 6.0 上 MP3 是 Format error，
+         *   同一首在 Tizen 9 上放得了（11 月诊断日志）。decodeAudioData 是浏览器自己的软件解码，不走电视的播放器：整首解成 AudioBuffer，
+         *   bufPlayer 放。太长的不解（DECODE_MAX_SEC，内存）。解不解得开、用了多久，成没成都记一行 —— 电视上还没验证过 */
         function viaWebAudio(my, it, url, why) {
             clearInterval(watch);
-            var t0 = performance.now();
-            fetch(url).then(function (r) { return r.arrayBuffer(); }).then(function (ab) {
+            var t0 = performance.now(), isWav = it.ext === "flac", Ctx = window.AudioContext || window.webkitAudioContext;
+            var fmt = isWav ? "WAV" : String(it.ext || it.mime || "?").toUpperCase();
+            if (!Ctx) { fail(my, why + "；" + tx("这台电视也没有 Web Audio")); return; }
+            if (!isWav) {
+                /* 解出来多大：时长 × 采样率 × 2 声道 × 4 字节。Telegram 没给时长的按 128kbps 估 */
+                var sec = it.duration || (it.size ? it.size / 16000 : 0);
+                if (sec > DECODE_MAX_SEC) {
+                    R("<audio> 不收这首 " + fmt + "（" + why + "），" + Math.round(sec / 60) + " 分钟太长，不用 Web Audio 解（解出来要 " + Math.round(sec * 48000 * 8 / 1048576) + " MB 上下）");
+                    fail(my, tx("这台电视放不了这首 {0}；改用软件解码只能放 {1} 分钟以内的，这首 {2} 分钟", fmt, DECODE_MAX_SEC / 60, Math.round(sec / 60)), true);
+                    return;
+                }
+                o.onState("loading", { got: 0, total: 0, stage: "webaudio" });
+            }
+            var ctx = null, ab = 0;
+            fetch(url).then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
                 if (my !== token) { return; }
-                var w = wavPcm(ab);
-                if (!w || !(window.AudioContext || window.webkitAudioContext)) { fail(my, why + "；Web Audio 也放不了（" + (w ? "没有 AudioContext" : "读不出 WAV") + "）"); return; }
-                dropWav();
-                var my2 = token;
-                wav = pcmPlayer(w, function () { if (my2 === token) { ended(); } });
+                ab = buf.byteLength;
+                if (isWav) {
+                    var w = wavPcm(buf);
+                    if (!w) { throw new Error("读不出 WAV"); }
+                    dropWav();
+                    wav = pcmPlayer(w, function () { if (my === token) { ended(); } });
+                    return "读 PCM " + Math.round(performance.now() - t0) + "ms，" + w.ch + " 声道 " + w.rate + "Hz";
+                }
+                ctx = new Ctx();
+                return decodeAudio(ctx, buf).then(function (ab2) {
+                    if (my !== token) { closeCtx(ctx); return; }
+                    dropWav();
+                    wav = bufPlayer(ctx, ab2, function () { if (my === token) { ended(); } });
+                    return "decodeAudioData " + Math.round(performance.now() - t0) + "ms，" + ab2.numberOfChannels + " 声道 " + ab2.sampleRate + "Hz，解出来 " +
+                        Math.round(ab2.length * ab2.numberOfChannels * 4 / 1048576) + " MB";
+                });
+            }).then(function (how) {
+                if (my !== token || !how || !wav) { return; }
                 return wav.play().then(function () {
-                    R("改用 Web Audio 放：" + (why || "") + "，" + w.ch + " 声道 " + w.rate + "Hz " + Math.round(wav.duration) + " 秒，读 PCM " + Math.round(performance.now() - t0) + "ms");
+                    if (my !== token) { return; }
+                    R("<audio> 不收这首 " + fmt + "（" + why + "），改用 Web Audio 放起来了：" + how + "，" + Math.round(wav.duration) + " 秒（" + mb(ab) + "）");
                     playing();
                 });
-            }).catch(function (e) { if (my === token) { fail(my, why + "；Web Audio 也放不了：" + errStr(e)); } });
+            }).catch(function (e) {
+                if (my !== token) { return; }
+                if (ctx && !wav) { closeCtx(ctx); }
+                R("<audio> 不收这首 " + fmt + "（" + why + "），Web Audio 也放不了（" + Math.round(performance.now() - t0) + "ms，" + mb(ab) + "）：" + (e && e.name ? e.name + " " : "") + errStr(e));
+                fail(my, why + "；" + tx("Web Audio 也放不了：{0}", errStr(e)));
+            });
         }
         function playing() {
             fails = 0;
@@ -219,11 +304,12 @@ var Music = (function () {
             var it = list[idx] || {}, mime = it.ext === "flac" ? "audio/wav" : mimeOf(it);
             var msg = "audio error " + (e ? e.code + (e.message ? " " + e.message : "") : "?") + "（" + mime + " canPlayType=" + (audio.canPlayType(mime) || "空") + "）";
             var c = cache[it.fileKey];
-            if (mime === "audio/wav" && c && c.url) {
-                R("<audio> 不收这份 WAV（" + msg + "），改用 Web Audio");
+            /* 4 = 不收这份（格式 / 解码器）：下好的还在就改用 Web Audio。别的（网络、播放中途解码出错）照旧算放不了 */
+            if (e && e.code === 4 && c && c.url) {
                 var url = c.url;
                 audio.removeAttribute("src");
-                viaWebAudio(token, it, url, msg);
+                try { audio.load(); } catch (e2) {}
+                viaWebAudio(++token, it, url, msg);
                 return;
             }
             fail(token, msg);
@@ -277,5 +363,5 @@ var Music = (function () {
         return api;
     }
 
-    return { create: create, test: { rejectWav: function (on) { rejectWav = !!on; } } };
+    return { create: create, test: { reject: function (kinds) { fakeReject = {}; (kinds || []).forEach(function (k) { fakeReject[k] = true; }); } } };
 })();

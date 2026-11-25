@@ -44,6 +44,44 @@ app.forEach((l, i) => {
   if (/"[^"]*[一-鿿][^"]*"/.test(raw)) fail(`app.js:${i + 1} 直接写了中文：${code.trim().slice(0, 140)}`);
 });
 
+/* 4. 选哪种语言（启动时 i18n.js 读 localStorage / navigator.language）。1.2.9 以前外国的新用户放过一部片子，第二次打开就成了中文：
+ *    「跟系统语言」不存，有看过的记录就当成双语之前的老用户定成 zh 存下来。现在：没选过永远跟系统语言；被那条存成 zh 的一次性改回 en */
+function boot(stored, sys) {
+  const store = new Map(Object.entries(stored)), logs = [];
+  const c = { navigator: { language: sys }, localStorage: { getItem: k => (store.has(k) ? store.get(k) : null), setItem: (k, v) => { store.set(k, String(v)); } },
+              document: {}, Log: { report: (k, m) => logs.push(k + ': ' + m) } };
+  vm.createContext(c);
+  vm.runInContext(fs.readFileSync(ROOT + 'app/js/i18n.js', 'utf8') + ';this.I18n = I18n;', c);
+  return { lang: c.I18n.lang, why: c.I18n.why, store, logs };
+}
+const seen = { 'tg.progress.v1': '{"abc":{"t":300}}', 'tg.lastSource.v1': '{"id":7}' };
+const langCases = [
+  ['新装、英文系统', {}, 'en-GB', 'en'],
+  ['新装、中文系统', {}, 'zh-CN', 'zh'],
+  ['外国的新用户放过片子、第二次打开（以前会变成中文）', { ...seen, 'tg.lang.fix1': '1' }, 'en-GB', 'en'],
+  ['外国的新用户放过片子、改正之前装的', seen, 'es-MX', 'en'],
+  ['被旧的那条存成 zh、系统不是中文：一次性改成 en', { ...seen, 'tg.lang.v1': 'zh' }, 'en-GB', 'en'],
+  ['存的 zh、系统是中文：不动', { ...seen, 'tg.lang.v1': 'zh' }, 'zh-TW', 'zh'],
+  ['改正过之后手动选的 zh：留着', { 'tg.lang.v1': 'zh', 'tg.lang.fix1': '1' }, 'en-US', 'zh'],
+  ['存的 en、系统是中文：不动', { 'tg.lang.v1': 'en' }, 'zh-CN', 'en'],
+];
+for (const [name, stored, sys, want] of langCases) {
+  const r = boot(stored, sys);
+  if (r.lang !== want) fail(`语言：${name} → ${r.lang}（要 ${want}，${r.why}）`);
+  if (r.store.get('tg.lang.fix1') !== '1') fail(`语言：${name} → 改正标记没记下`);
+  if (!('tg.lang.v1' in stored) && r.store.has('tg.lang.v1')) fail(`语言：${name} → 没手动选过却存了 ${r.store.get('tg.lang.v1')}`);
+}
+{
+  const first = boot({ ...seen, 'tg.lang.v1': 'zh' }, 'en-GB');
+  if (first.logs.length !== 1 || !/系统是 en-GB，原来存的 zh 改成 en（一次性）/.test(first.logs[0])) fail('语言：一次性改正那行日志不对：' + JSON.stringify(first.logs));
+  /* 改正之后观众手动切回中文：下次打开还是中文，也不再记那行 */
+  const stored = Object.fromEntries(first.store);
+  stored['tg.lang.v1'] = 'zh';
+  const again = boot(stored, 'en-GB');
+  if (again.lang !== 'zh' || again.logs.length) fail(`语言：改正之后手动选的中文没留住（${again.lang}，${again.logs.join(' / ')}）`);
+}
+console.log(`  语言：${langCases.length + 2} 种情况`);
+
 /* 日期 */
 console.log('  日期：' + I18n.date(new Date(2025, 9, 18)) + ' / ' + I18n.date(new Date()));
 console.log(bad ? `${bad} 处有问题` : '全部通过');

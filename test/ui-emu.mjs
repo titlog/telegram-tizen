@@ -153,7 +153,7 @@ const browser = await chromium.launch({
   args: ['--autoplay-policy=no-user-gesture-required', '--disable-web-security'],   // 电视上 widget 不受 CORS 约束，假站点的请求跨域
 });
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
-page.on('console', m => { const t = m.text(); if (/^(app|player|web|onerror|csp):/.test(t)) console.log('  ' + t); });
+page.on('console', m => { const t = m.text(); if (/^(app|player|web|music|onerror|csp):/.test(t)) console.log('  ' + t); });
 let thumbCalls = 0;
 await page.exposeFunction('__thumbCall', () => { thumbCalls++; });
 page.on('pageerror', e => console.log('  pageerror ' + e.message));
@@ -247,7 +247,7 @@ const subsSeen = async (ms) => { const seen = new Set(); const t0 = Date.now();
   return [...seen].join(' / ') || '（没有）'; };
 
 await page.goto('http://localhost:8768/app/index.html');
-await page.evaluate((l) => { try { localStorage.clear(); localStorage.setItem('tg.lang.v1', l); } catch (e) {} }, UILANG);
+await page.evaluate((l) => { try { localStorage.clear(); localStorage.setItem('tg.lang.v1', l); localStorage.setItem('tg.lang.fix1', '1'); } catch (e) {} }, UILANG);   // fix1：别让一次性改正（i18n.js）把手动选的中文改成英文
 await page.reload();
 await sleep(1500);
 await shot('1-home');
@@ -459,13 +459,21 @@ if ((!process.env.ONLY || process.env.ONLY === 'music') && musicItems.length) {
   await key(13); await sleep(800);
   const a2 = await mu();
   console.log('  点同一张回到画面：' + JSON.stringify(a2) + (a2.t >= a1.t ? '（接着放，没重来）' : ' ✗ 重来了'));
+  /* 按方向键把焦点挪到第 i 张卡片（一排 3 张；左键在第一列会拉出来源栏，所以先上下、再左右） */
+  const goCard = async (i) => {
+    const c = await page.evaluate(() => { const e = document.querySelector('.card.focus'); return e ? +e.id.slice(1) : -1; });
+    if (c < 0) return;
+    const dy = Math.floor(i / 3) - Math.floor(c / 3), dx = i % 3 - c % 3;
+    if (dy) await key(dy > 0 ? 40 : 38, Math.abs(dy));
+    if (dx) await key(dx > 0 ? 39 : 37, Math.abs(dx));
+  };
   /* 大 WAV 走 Web Audio（11-13 越南一台 Tizen 6.0：42–52 MB 的 WAV <audio> 不收）：让 <audio> 假装不收，FLAC 那首照样走、暂停、接着放、快进 */
   const fi = musicItems.findIndex((m) => m.ext === 'flac');
   if (fi >= 0) {
     const am = () => page.evaluate(() => window.__app.music());
     await key(10009); await sleep(600);
-    await page.evaluate(() => Music.test.rejectWav(true));
-    await key(39, fi); await key(13);
+    await page.evaluate(() => Music.test.reject(['wav']));
+    await goCard(fi); await key(13);
     let w0 = null; for (let i = 0; i < 40 && !(w0 && w0.time > 1.5); i++) { await sleep(250); w0 = await am(); }
     await key(13); await sleep(800); const p1 = await am(); await sleep(800); const p2 = await am();
     await key(13); await sleep(1200); const r1 = await am();
@@ -474,7 +482,24 @@ if ((!process.env.ONLY || process.env.ONLY === 'music') && musicItems.length) {
       '，暂停 ' + (p1.paused && Math.abs(p2.time - p1.time) < 0.05 ? '停住了' : ' ✗ ' + JSON.stringify([p1, p2])) +
       '，接着放 ' + (!r1.paused && r1.time > p2.time ? 't=' + r1.time.toFixed(1) : ' ✗ ' + JSON.stringify(r1)) +
       '，右键 ' + r1.time.toFixed(1) + ' → ' + s1.time.toFixed(1) + (s1.time > r1.time + 3 ? '' : ' ✗ 没跳过去'));
-    await page.evaluate(() => Music.test.rejectWav(false));
+    await page.evaluate(() => Music.test.reject([]));
+  }
+  /* MP3 / M4A 走 Web Audio（11 月：Tizen 10 上 <audio> 每一首都是 DECODER_ERROR_NOT_SUPPORTED，Tizen 6.0 的 MP3 是 Format error）：
+   * 让 <audio> 假装不收，decodeAudioData 整首解开放；暂停、接着放、快进 */
+  for (const ext of ['mp3', 'm4a']) {
+    const di = musicItems.findIndex((m) => m.ext === ext);
+    if (di < 0) continue;
+    const am = () => page.evaluate(() => window.__app.music());
+    await key(10009); await sleep(600);
+    await page.evaluate((x) => Music.test.reject([x]), ext);
+    await goCard(di); await key(13);
+    let w0 = null; for (let i = 0; i < 40 && !(w0 && w0.index === di && w0.time > 1.5); i++) { await sleep(250); w0 = await am(); }
+    await key(13); await sleep(800); const p1 = await am(); await sleep(800); const p2 = await am();
+    await key(13); await sleep(1200); const r1 = await am();
+    await key(39); await sleep(1200); const s1 = await am();
+    const ok = w0 && w0.index === di && w0.time > 1.5 && p1.paused && Math.abs(p2.time - p1.time) < 0.05 && !r1.paused && r1.time > p2.time && s1.time > r1.time + 3;
+    console.log(`  ${ext.toUpperCase()} 走 Web Audio（decodeAudioData）：` + (ok ? '走起来、暂停、接着放、快进都对' : ' ✗ ' + JSON.stringify({ w0, p1, p2, r1, s1 })) + '，状态「' + await txt('#mu-state') + '」');
+    await page.evaluate(() => Music.test.reject([]));
   }
   await key(10009); await sleep(400);
   /* 换到有视频的来源放一部：歌要停 */

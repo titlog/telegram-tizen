@@ -189,7 +189,7 @@ const shot = async (name) => {
 
 await page.goto('http://localhost:8768/app/index.html');
 /* 「看到哪里」：钢之泪看过一半，卡片上有进度条 */
-await page.evaluate((l) => { try { localStorage.clear(); localStorage.setItem('tg.lang.v1', l); } catch (e) {} }, EN ? 'en' : 'zh');
+await page.evaluate((l) => { try { localStorage.clear(); localStorage.setItem('tg.lang.v1', l); localStorage.setItem('tg.lang.fix1', '1'); } catch (e) {} }, EN ? 'en' : 'zh');   // fix1：别让一次性改正（i18n.js）把选的中文改成英文
 await page.reload();
 await sleep(1200);
 await page.evaluate((t) => Store.setProgress('f2', 410, 734, t), items[2].title);
