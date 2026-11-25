@@ -1,4 +1,4 @@
 {
- "manifest": "{\"version\":\"1.2.9\",\"shell\":1,\"sha256\":\"96cbf72fe981df93c739894d10775d2d6939d5dfd4aab834090b549e0552d46e\",\"size\":590201,\"date\":\"2026-11-14T12:03:36.161Z\",\"urls\":[\"https://diag.titdev.nl/v1/update/telegram-tizen/bundle-1.2.9.json\",\"https://cdn.jsdelivr.net/gh/titlog/telegram-tizen@v1.2.9/update/bundle-1.2.9.json\",\"https://raw.githubusercontent.com/titlog/telegram-tizen/v1.2.9/update/bundle-1.2.9.json\"]}",
- "sig": "F4OhhKsFMpcy3NraXk/P8FLnyt9kaK+so3hxbUmHHsi8p9M793aETZRHAVWux/7C6Wugk8fYxlO+aPv1XtKrCQ=="
+ "manifest": "{\"version\":\"1.2.10\",\"shell\":1,\"sha256\":\"b81fbc7d2400d98468ad740202d9261643673f0d849a62e1f3ab5eed82fc3f12\",\"size\":620216,\"date\":\"2026-11-25T13:49:53.417Z\",\"urls\":[\"https://diag.titdev.nl/v1/update/telegram-tizen/bundle-1.2.10.json\",\"https://cdn.jsdelivr.net/gh/titlog/telegram-tizen@v1.2.10/update/bundle-1.2.10.json\",\"https://raw.githubusercontent.com/titlog/telegram-tizen/v1.2.10/update/bundle-1.2.10.json\"]}",
+ "sig": "xQlIWt1gY4UCROEGKIP85eAlBsnrlZ5/CK9PO6reNlvDTaIgBnkyGIV2/9tkJIl9jfL6+dTXjAcVHK8ucX1htA=="
 }
