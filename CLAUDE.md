@@ -46,6 +46,7 @@ test/check-flac.mjs flac.js 离线校验（13 种 FLAC，PCM 和 ffmpeg 逐字�
 test/legacy-bigint.mjs  build/legacy/jsbi-bigint.js 对着原生 BigInt 随机对拍（deploy / release 卡着）
 test/check-subs.mjs subs.js 校验（编码、格式、tx3g、MKV 块；PGS 和 ffmpeg 的渲染逐像素比）
 test/i18n.mjs     界面每句话都有英文、占位符对得上；app.js 里往屏幕上写的地方没有漏套 T
+test/peer-clash.mjs  会话库里存着的人和新来的撞了（唯一索引）：真的 mtcute IdbStorage + 真的 tg.js，清缓存、会话不丢
 test/apikey.mjs   API ID 从哪来、填写页：没带 / 带的被拒 / 打乱过的 / 能用，键盘真敲进输入框（假 Telegram 层，截图 logs/api-*.png）
 test/run.mjs      播放引擎桌面测试（Playwright + test/serve.mjs 限速模拟电视）
 test/web.mjs      网页链接那条路：真网站解析 → 放 → 跳转（NOXHR=1 走隐藏框）
@@ -68,6 +69,7 @@ node test/check-flac.mjs                         # 改 flac.js 之后
 node test/check-subs.mjs                         # 改 subs.js 之后
 node test/i18n.mjs                               # 改了界面上的字之后
 node test/compat.mjs                             # 改 build/src/compat.js 之后（deploy 也跑）
+node test/peer-clash.mjs                         # 改 tg.js 的 again / login、mtcute 版本之后
 node test/apikey.mjs                             # 改 apikey.js、填写页、登录出错的处理之后（UILANG=en 英文）
 zsh tools/deploy.sh --diag                       # 诊断日志在电视上走一遍（7 步，1 分钟）；先开 PORT=8096 node ../bilibili-tizen/tools/diag-local.mjs
 zsh tools/deploy.sh --loginexpiry                # 扫码页上后台线程的连接作废，看是不是重连、换码（3 步，2 分钟；会添加一个账号再取消）
@@ -115,7 +117,8 @@ node test/serve.mjs & node test/ui-emu.mjs       # 改界面之后，看 logs/ui
   手动上传不到 5 行不传。mtcute（`build/` 下任何东西）、hls.js 不随更新下发，改了就是换壳、`SHELL` 加一；只换打包目标、补 API 的例外改 `update/shell.json`
   的指纹（1.1.3、1.2.0 都是这样）。→ [docs/自动更新与诊断日志.md](docs/自动更新与诊断日志.md)
 - **多账号**：本地记录用 `Accounts.scope()`，认人看用户编号。会话在别处被结束（401）回扫码页；扫码的是另一个人就把这一行改成他；
-  进不去的群 / 频道说清楚、不当出事、从来源栏拿掉。→ [docs/多账号.md](docs/多账号.md)
+  进不去的群 / 频道说清楚、不当出事、从来源栏拿掉。**会话库 `peers` 表的号码、用户名是唯一索引**：库里另一个 id 的人占着，新来的人存不进去，
+  mtcute 只说「IDB transaction was aborted」（11-26 账号注销后扫码，issue #5 / #6）：清掉 `peers` / `messageRefs` 再来一次（`clearPeers`，`test/peer-clash.mjs`）。→ [docs/多账号.md](docs/多账号.md)
 - **README.md 是英文**（GitHub 默认展示），中文在 README.zh.md；截图两套。→ [docs/README截图.md](docs/README截图.md)
 - **电视上还没验证**：Tizen 5.0 / 5.5 / 6.x 真机；AC-3 有没有声音；换音轨重开停在原处；真遥控器的长按；下一集倒计时；切换界面语言；
   添加 / 切换 / 退出账号；在电视上用遥控器填 API ID；`<audio>` 不收的 MP3 / M4A 用 `decodeAudioData` 解不解得了（日志「改用 Web Audio 放起来了 / 也放不了」）；

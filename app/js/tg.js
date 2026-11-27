@@ -67,10 +67,42 @@ var TG = (function () {
      * 点开的来源全是 FLOOD_WAIT_15–21、当成出事传了。半分钟以内的照它说的等完再试 */
     function floodWait(e) { var m = /FLOOD_WAIT_(\d+)/.exec(String(e && e.message)); return m ? +m[1] : 0; }
     function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    /* 会话库里 peers 表的 phone、username 是唯一索引：库里存着另一个 id 的人用过的号码 / 用户名（账号注销后同一个号码重新注册、
+     * 用户名换了主人），新来的这个人就存不进去，整个事务回滚。mtcute 只说「IDB transaction was aborted」：它读 tx.error 的那一刻还是 null，
+     * 真正的原因是那一条 put 的 ConstraintError（test/peer-clash.mjs 在 Chrome 里用 mtcute 自己的 IDB 驱动量过，
+     * 号码、用户名两种都是这句话；会话库里别的表没有唯一索引）。11-26 一台 Tizen 10（issue #5 / #6）：账号 USER_DEACTIVATED 之后扫码登录，
+     * 每次存自己都撞上，扫码、之后每次启动的 getMe 都失败。peers、messageRefs 只是缓存（会话列表会重新填），清掉再来一次；
+     * 会话本身（authKeys、kv）不动 */
+    function peerClash(e) { return /IDB transaction was aborted/.test(String(e && e.message)); }
+    function clearPeers(e) {
+        var name = Accounts.active().storage, t0 = performance.now();
+        return new Promise(function (resolve, reject) {
+            var rq = indexedDB.open(name);
+            /* 库不在（不该发生）：别在这里建一个空的 */
+            rq.onupgradeneeded = function () { rq.transaction.abort(); };
+            rq.onerror = function () { reject(rq.error || new Error("打不开 " + name)); };
+            rq.onsuccess = function () {
+                var db = rq.result, t;
+                function done(err) { db.close(); if (err) { reject(err); } else { resolve(); } }
+                try { t = db.transaction(["peers", "messageRefs"], "readwrite"); } catch (x) { done(x); return; }
+                t.objectStore("peers").clear();
+                t.objectStore("messageRefs").clear();
+                t.oncomplete = function () { done(); };
+                t.onabort = function () { done(t.error || new Error("清 peers 的事务回滚了")); };
+            };
+        }).then(function () {
+            Log.report("tg", "会话库里存着的人和新来的撞了（" + (e && e.message) + "，phone / username 唯一索引），清掉 " + name + " 的 peers 缓存 " +
+                Math.round(performance.now() - t0) + "ms，再来一次");
+        }, function (x) {
+            Log.report("tg", "会话库里存着的人和新来的撞了，可 peers 缓存清不掉：" + (x && (x.name + " " + x.message)));
+            throw e;
+        });
+    }
     async function again(fn) {
-        for (var round = 0; ; round++) {
+        for (var round = 0, clashed = false; ; round++) {
             try { return await fn(); }
             catch (e) {
+                if (peerClash(e) && !clashed) { clashed = true; await clearPeers(e); continue; }
                 if (onSignedOut && signedOut(e)) { var f = onSignedOut; onSignedOut = null; f(e); }
                 var wait = floodWait(e);
                 if (wait && wait <= 30 && round < 2) {
@@ -99,10 +131,17 @@ var TG = (function () {
      * 「Worker connection expired」，在两次换码之间时报「signal is aborted without reason」（port 的 stopSignal 被中止）。
      * 1.1.2 上 boot() 就停在这里、二维码不再换（2026-10-23 一台别人的电视；--loginexpiry 复现）。重连、重新出码，最多三次 */
     async function login(onUrl, onScanned, askPassword, onBadPassword) {
-        for (var refused = 0, drops = 0; ;) {
+        for (var refused = 0, drops = 0, clashed = false; ;) {
             try {
                 return await client.signInQr({ onUrlUpdated: onUrl, onQrScanned: onScanned, password: askPassword, invalidPasswordCallback: onBadPassword });
             } catch (e) {
+                /* 扫上了、Telegram 那边已经登录，存这个人的时候撞上了库里另一个人（peerClash）：授权在那之前已经落了库
+                 * （11-26 那台下次启动 getMe 撞的是同一句，不是 401），不重新出码，清掉缓存直接问一次自己是谁 */
+                if (!leaving && !clashed && peerClash(e)) {
+                    clashed = true;
+                    await clearPeers(e);
+                    return await again(function () { return client.getMe(); });
+                }
                 /* 扫上了、在问两步验证的时候 401 AUTH_KEY_UNREGISTERED（2026-10-28 一台 Tizen 9，扫码后五分多钟）：进了启动失败页。
                  * 原因还不知道；重新出码让人再扫一次，日志那几行（扫上、要密码、交密码的时刻）留着下次分 */
                 if (!leaving && refused < 3 && signedOut(e)) {
